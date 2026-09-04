@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M2C · 中英双语 Tokenizer</title>
+  <link rel="stylesheet" href="assets/course.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">MINI-LLM · M2C</div>
+      <h1>训练一个真的能保存、加载和测试的 tokenizer</h1>
+      <p class="lede">上一节手写 BPE 是为了看懂核心循环。这一节改用 SentencePiece 处理真实细节，训练两个中英双语 tokenizer，并用固定测试集选择更合适的方案。</p>
+      <div class="status"><span class="tag">状态：教材已准备</span><span class="tag">实现方式：vibe coding + 审查</span><span class="tag">产出：Tokenizer v0</span></div>
+      <div class="actions"><a class="button secondary" href="index.html">返回课程入口</a><a class="button secondary" href="M02B-hand-bpe.html">上一节</a></div>
+    </header>
+
+    <nav class="jump"><a href="#scope">本节边界</a><a href="#data">语料</a><a href="#train">训练</a><a href="#inspect">测试</a><a href="#choose">选择</a><a href="#submit">验收</a></nav>
+
+    <section id="scope">
+      <h2>1. 先分清 v0 和最终版</h2>
+      <div class="grid">
+        <div class="card"><strong>这节的 Tokenizer v0</strong><p>用一份小而有代表性的中英双语语料跑通训练、保存、加载、编码、解码和质量对比。它会供 M3 数据管线开发使用。</p></div>
+        <div class="card"><strong>300M 的正式 Tokenizer</strong><p>等 M3 整理好真实预训练语料后，用相同流程重训；通过更大测试集后冻结版本，训练模型期间不再随意更换。</p></div>
+      </div>
+      <div class="callout green">这节不再重复手写生产级 BPE。你的责任是理解输入输出、关键配置和质量报告，并能识别 tokenizer 明显切坏的样本。</div>
+    </section>
+
+    <section id="data">
+      <h2>2. 准备一份小而多样的训练语料</h2>
+      <p>创建 <code>data/tokenizer_demo.txt</code>，每行一条独立文本。建议 500–2000 行，内容必须有权使用。演示阶段可以用你自己写的或 AI 生成并人工抽检的句子。</p>
+      <table>
+        <thead><tr><th>类别</th><th>至少覆盖</th><th>原因</th></tr></thead>
+        <tbody>
+          <tr><td>中文</td><td>日常表达、技术说明、不同标点</td><td>观察常见词组与单字的切分。</td></tr>
+          <tr><td>英文</td><td>普通句子、长单词、缩写</td><td>观察词根、词缀和空格边界。</td></tr>
+          <tr><td>中英混合</td><td>PyTorch、GPU、300M 等</td><td>贴近未来技术语料。</td></tr>
+          <tr><td>代码与数字</td><td>函数、变量、版本号、日期、小数</td><td>检查符号和数字是否被切得过碎。</td></tr>
+          <tr><td>少见字符</td><td>emoji、全角符号等</td><td>观察未知 token 和字符覆盖。</td></tr>
+        </tbody>
+      </table>
+      <p>训练前做两个检查：文件必须是 UTF-8；随机查看至少 30 行，确认不是同一句话机械重复，也没有乱码或隐私内容。</p>
+      <div class="callout">重复同一句 1000 次只会放大它的频率，不会创造语言多样性。Tokenizer 需要看到不同的字符组合和边界。</div>
+    </section>
+
+    <section id="train">
+      <h2>3. 用 SentencePiece 训练两个候选</h2>
+      <p>在服务器课程环境中安装：</p>
+      <pre>python -m pip install sentencepiece</pre>
+      <p>新建 <code>m2/train_sentencepiece.py</code>：</p>
+      <pre>from pathlib import Path
+import sentencepiece as spm
+
+DATA_FILE = "data/tokenizer_demo.txt"
+OUTPUT_DIR = Path("artifacts/tokenizers")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def train(vocab_size):
+    prefix = OUTPUT_DIR / f"bilingual_bpe_{vocab_size}"
+    spm.SentencePieceTrainer.train(
+        input=DATA_FILE,
+        model_prefix=str(prefix),
+        model_type="bpe",
+        vocab_size=vocab_size,
+        character_coverage=0.9995,
+        unk_id=0,
+        bos_id=1,
+        eos_id=2,
+        pad_id=3,
+        hard_vocab_limit=False,
+        shuffle_input_sentence=False,
+    )
+    return prefix.with_suffix(".model")
+
+
+for size in (256, 512):
+    print(train(size))</pre>
+      <p>运行后，每个候选会生成：</p>
+      <ul>
+        <li><code>.model</code>：编码/解码真正要加载的模型。</li>
+        <li><code>.vocab</code>：方便人类查看 token 词表。</li>
+      </ul>
+
+      <h3>关键参数只理解这些</h3>
+      <table>
+        <thead><tr><th>参数</th><th>人话解释</th></tr></thead>
+        <tbody>
+          <tr><td><code>model_type="bpe"</code></td><td>使用上一节学过的高频相邻片段合并思路。</td></tr>
+          <tr><td><code>vocab_size</code></td><td>希望词表达到的容量；小语料可能凑不满，所以演示时关闭硬性限制。</td></tr>
+          <tr><td><code>character_coverage</code></td><td>希望直接覆盖训练语料中多大比例的字符；极少见字符可能落入 UNK。</td></tr>
+          <tr><td><code>unk/bos/eos/pad_id</code></td><td>显式固定特殊 token 的 ID，避免后续模型和数据管线各自猜测。</td></tr>
+          <tr><td><code>shuffle_input_sentence=False</code></td><td>演示阶段保持训练输入顺序稳定，便于复现实验。</td></tr>
+        </tbody>
+      </table>
+      <div class="callout blue"><code>hard_vocab_limit=False</code> 只是照顾小型演示语料。务必打印 <code>sp.get_piece_size()</code>，确认两个候选实际生成了多少 token；不要只相信文件名里的 256/512。</div>
+    </section>
+
+    <section id="inspect">
+      <h2>4. 固定测试集，查看它到底怎么切</h2>
+      <p>新建 <code>m2/evaluate_tokenizer.py</code>，测试文本不能拿去训练 tokenizer：</p>
+      <pre>TEST_SAMPLES = [
+    "我正在从零训练一个三亿参数的语言模型。",
+    "Large language models predict the next token.",
+    "PyTorch支持BF16和多GPU训练。",
+    "loss = cross_entropy(logits, targets)",
+    "版本v2.1发布于2026-09-04，准确率为98.7%。",
+    "一个训练语料里没有出现过的长单词: tokenization",
+    "你好👋，今天的GPU利用率怎么样？",
+]</pre>
+      <p>对两个模型分别打印：</p>
+      <pre>import sentencepiece as spm
+
+
+def inspect(model_file):
+    sp = spm.SentencePieceProcessor(model_file=model_file)
+    total_tokens = 0
+    total_chars = 0
+    total_unk = 0
+
+    print("actual vocab size:", sp.get_piece_size())
+    print("special ids:", sp.unk_id(), sp.bos_id(), sp.eos_id(), sp.pad_id())
+
+    for text in TEST_SAMPLES:
+        pieces = sp.encode(text, out_type=str)
+        ids = sp.encode(text, out_type=int)
+        decoded = sp.decode(ids)
+
+        total_tokens += len(ids)
+        total_chars += len(text)
+        total_unk += sum(token_id == sp.unk_id() for token_id in ids)
+
+        print("\ntext   :", text)
+        print("pieces :", pieces)
+        print("ids    :", ids)
+        print("decoded:", decoded)
+
+    print("\ntokens per character:", total_tokens / total_chars)
+    print("UNK count:", total_unk)</pre>
+      <p><code>tokens per character</code> 是这组测试上“每个字符平均被切成多少 token”。在同一测试集上越低，通常表示序列越短；但它不是唯一质量指标。</p>
+
+      <h3>人工审查四件事</h3>
+      <ol>
+        <li><strong>能否还原：</strong>普通测试句 encode 后再 decode，内容是否符合预期？注意 SentencePiece 可能按其规范化规则处理空格，不要把所有字符串都机械要求逐字节相同。</li>
+        <li><strong>有没有 UNK：</strong>尤其看 emoji、罕见符号和未见字符。UNK 意味着原始内容的一部分丢失。</li>
+        <li><strong>是否切得离谱：</strong>常见中英文片段、数字、技术词和代码是否被过度拆碎。</li>
+        <li><strong>实际长度：</strong>较大词表有没有在固定测试集上真正减少 token 数。</li>
+      </ol>
+    </section>
+
+    <section id="choose">
+      <h2>5. 不凭感觉选词表，写一张对比表</h2>
+      <table>
+        <thead><tr><th>候选</th><th>实际词表大小</th><th>测试总 token</th><th>UNK 数</th><th>人工发现的问题</th></tr></thead>
+        <tbody>
+          <tr><td>请求 256</td><td>运行后填写</td><td>填写</td><td>填写</td><td>填写</td></tr>
+          <tr><td>请求 512</td><td>运行后填写</td><td>填写</td><td>填写</td><td>填写</td></tr>
+        </tbody>
+      </table>
+      <p>然后选一个作为 v0，并给出两三句话的理由。不是默认选更大的：如果小语料导致两个候选实际大小接近，或者 512 几乎没有减少序列长度，这本身就是重要结论。</p>
+      <p>把选中的文件复制或明确记录为：</p>
+      <pre>artifacts/tokenizers/bilingual_v0.model
+artifacts/tokenizers/bilingual_v0.vocab</pre>
+      <div class="callout">不要删除原候选及配置。Tokenizer 一旦改变，同一段文本的 ID 就可能全部变化；后续数据和模型 checkpoint 必须知道自己对应哪个 tokenizer 版本。</div>
+    </section>
+
+    <section>
+      <h2>6. 一个故障实验</h2>
+      <p>找一个训练语料和测试集都没有的罕见字符，例如另一个 emoji 或生僻符号，观察它是否变成 <code>&lt;unk&gt;</code>。然后回答：</p>
+      <p>如果多个不同的原始字符都编码为同一个 UNK ID，decode 时为什么不可能知道原来是哪一个？</p>
+      <p>只需观察和解释；本节不要求你立刻实现 byte fallback。正式 tokenizer 会在 M3 后用真实字符分布重新决定覆盖与 fallback 策略。</p>
+    </section>
+
+    <section>
+      <h2>7. 三个问题</h2>
+      <div class="question"><strong>题 1</strong><br>为什么 tokenizer 的质量不能只用“词表越大、token 越少”来判断？</div>
+      <div class="question"><strong>题 2</strong><br>为什么训练 300M 模型期间不能随意换一个新 tokenizer，即使新 tokenizer 看起来更好？</div>
+      <div class="question"><strong>题 3</strong><br>这次为什么只称为 v0？M3 完成后还需要利用什么信息决定正式版本？</div>
+    </section>
+
+    <section id="submit">
+      <h2>8. 提交与验收</h2>
+      <ol>
+        <li>演示语料的规模、类别分布和 30 行抽检结论。</li>
+        <li>训练脚本、评测脚本以及两个候选的文件。</li>
+        <li>完整对比表、7 条测试的切分输出和 v0 选择理由。</li>
+        <li>故障实验与三个问题的答案。</li>
+      </ol>
+      <p>完成后，M2 正式结束。下一阶段进入 M3：把真实原始文档变成干净、可复现、可供八卡训练读取的 token 数据分片。</p>
+      <h3>官方参考</h3>
+      <ul>
+        <li><a href="https://github.com/google/sentencepiece">SentencePiece 官方仓库与设计说明</a></li>
+        <li><a href="https://github.com/google/sentencepiece/blob/master/python/README.md">SentencePiece Python 用法</a></li>
+        <li><a href="https://github.com/google/sentencepiece/blob/master/doc/options.md">SentencePiece 训练参数说明</a></li>
+      </ul>
+    </section>
+    <footer>M2C · 完成后进入 M3 预训练数据工程</footer>
+  </main>
+</body>
+</html>

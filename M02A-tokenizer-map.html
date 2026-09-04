@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M2A · Tokenizer 地图</title>
+  <link rel="stylesheet" href="assets/course.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">MINI-LLM · M2A</div>
+      <h1>同一句话，可以切成完全不同的 token</h1>
+      <p class="lede">模型只能接收整数。Tokenizer 决定文本先被切成哪些片段，再把每个片段映射成哪个 ID。切法会直接影响序列长度、词表大小、训练成本和模型处理生僻内容的能力。</p>
+      <div class="status"><span class="tag">状态：教材已准备</span><span class="tag">前置：完成 M1D</span><span class="tag">本节不训练模型</span></div>
+      <div class="actions"><a class="button secondary" href="index.html">返回课程入口</a><a class="button secondary" href="M01D-trainable-bigram.html">上一节</a></div>
+    </header>
+
+    <nav class="jump"><a href="#job">作用</a><a href="#four">四种切法</a><a href="#vocab">词表大小</a><a href="#task">实验</a><a href="#submit">验收</a></nav>
+
+    <section id="job">
+      <h2>1. Tokenizer 的工作只有两段</h2>
+      <div class="flow"><span>原始文本</span><b>→</b><span>切成 token</span><b>→</b><span>换成 token ID</span></div>
+      <p>例如一种字符切法可能得到：</p>
+      <pre>文本：我爱猫
+token：["我", "爱", "猫"]
+ID：[104, 28, 376]</pre>
+      <p><code>104</code> 本身并不天然表示“我”。这是 tokenizer 的词表规定的映射。换一个 tokenizer，同一个“我”可能得到完全不同的 ID。</p>
+      <div class="callout green"><strong>模型看到的是 ID，但真正参与计算的是 ID 查到的 embedding。</strong>ID 只是地址，不是词义大小，也不存在“ID 越近，意思越近”。</div>
+    </section>
+
+    <section id="four">
+      <h2>2. 四种典型切法</h2>
+      <table>
+        <thead><tr><th>方案</th><th>“deep learning 深度学习”可能怎样切</th><th>主要特点</th></tr></thead>
+        <tbody>
+          <tr><td>字符 Character</td><td><code>d e e p … 深 度 学 习</code></td><td>词表较小，但英文被切得很长。</td></tr>
+          <tr><td>词 Word</td><td><code>deep / learning / 深度学习</code></td><td>常见词很短，但词表会巨大，生词难处理。</td></tr>
+          <tr><td>字节 Byte</td><td>按 UTF-8 的原始字节切</td><td>只有 256 种基本值，任何文本都能表示；中文通常一个字占多个 byte。</td></tr>
+          <tr><td>子词 Subword</td><td><code>deep / learn / ing / 深度 / 学习</code></td><td>常见片段合并，罕见内容拆小；现代 LLM 的常用折中。</td></tr>
+        </tbody>
+      </table>
+      <p>实际 tokenizer 还会处理空格、标点、Unicode 规范化和特殊 token，但先抓住核心：<strong>常见内容尽量用较大的片段，罕见内容仍能拆开表达。</strong></p>
+
+      <h3>为什么中文和英文的直觉不同</h3>
+      <p>英文天然有空格，但 <code>unbelievable</code>、代码标识符和新词仍会不断出现。中文通常没有词间空格，“机器学习”该切成“机器/学习”还是“机/器/学/习”需要由规则或数据决定。子词算法就是在这两类语言之间寻找可用折中。</p>
+    </section>
+
+    <section id="vocab">
+      <h2>3. vocab_size 不是算出来的唯一答案</h2>
+      <p><code>vocab_size</code> 是你给 tokenizer 的容量预算：最多想保留多少种 token。训练算法再根据语料决定这些位置放哪些片段。</p>
+      <div class="grid">
+        <div class="card"><strong>词表更大</strong><p>常见词可能用一个 token 表示，序列更短；但 embedding 和输出层更大，低频 token 学得也可能不充分。</p></div>
+        <div class="card"><strong>词表更小</strong><p>参数更省，每个 token 出现次数通常更多；但句子会被切得更碎，Attention 要处理更长的序列。</p></div>
+      </div>
+      <p>所以 32K、50K、100K 都不是数学上自动得出的答案，而是结合语言、数据规模、模型规模、序列成本和测试结果做出的工程选择。我们的 300M 模型会在真实语料统计之后再冻结词表大小。</p>
+      <div class="callout">词表大小还会影响模型参数：输入 embedding 大致含有 <code>vocab_size × d_model</code> 个参数；若输出层不与它共享权重，还会再有一份相近规模。这个计算到 M5 建完整模型时正式展开。</div>
+    </section>
+
+    <section id="task">
+      <h2>4. 最小实验：亲眼比较长度</h2>
+      <p>新建 <code>m2/compare_representations.py</code>，使用下面 6 个样本：</p>
+      <pre>samples = [
+    "我喜欢机器学习。",
+    "Deep learning is useful.",
+    "用PyTorch训练300M模型",
+    "price = 12.50",
+    "def forward(x):",
+    "你好👋，LLM!",
+]</pre>
+      <p>对每个样本打印三种表示及其长度：</p>
+      <ol>
+        <li><strong>字符：</strong><code>list(text)</code>。</li>
+        <li><strong>空格分词：</strong><code>text.split()</code>。它只是故意设置的简陋 word baseline，不代表合格 tokenizer。</li>
+        <li><strong>UTF-8 字节：</strong><code>list(text.encode("utf-8"))</code>。</li>
+      </ol>
+      <pre>for text in samples:
+    characters = ...
+    whitespace_words = ...
+    utf8_bytes = ...
+
+    print("文本:", text)
+    print("字符:", characters, "长度:", len(characters))
+    print("空格切词:", whitespace_words, "长度:", len(whitespace_words))
+    print("UTF-8 字节:", utf8_bytes, "长度:", len(utf8_bytes))</pre>
+      <h3>你要观察的不是哪种“必赢”</h3>
+      <ul>
+        <li>中文在 <code>split()</code> 下为什么可能整句只有 1 个片段？</li>
+        <li>中文字符在 UTF-8 下为什么通常比英文 ASCII 字符占更多 byte？</li>
+        <li>代码、数字、emoji 会让“按词切”遇到哪些边界问题？</li>
+      </ul>
+      <p>这一节不要求你自己写 Unicode 解析器，也不要求记编码知识。能根据输出说明各种切法的代价就够了。</p>
+    </section>
+
+    <section>
+      <h2>5. 三个问题</h2>
+      <div class="question"><strong>题 1</strong><br>token ID 是模型理解到的“词义编号”吗？为什么？</div>
+      <div class="question"><strong>题 2</strong><br>词表变大为什么可能让序列变短，同时又让模型参数变多？</div>
+      <div class="question"><strong>题 3</strong><br>如果只用空格切词，中英文和代码分别会出现什么明显问题？</div>
+    </section>
+
+    <section id="submit">
+      <h2>6. 提交与验收</h2>
+      <ol>
+        <li><code>m2/compare_representations.py</code> 和完整输出。</li>
+        <li>从中文、英文、代码、emoji 中各挑一个值得注意的现象。</li>
+        <li>三个问题的答案。</li>
+      </ol>
+      <p>完成标准：能解释“切得更细/更粗”改变了什么，并理解 vocab_size 是需要实验验证的设计参数。</p>
+    </section>
+    <footer>M2A · 下一节：手工执行 BPE</footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M1B · 手搓 Bigram 计数模型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f7f7f4, #121311);
+      --paper: light-dark(#ffffff, #1b1d1a);
+      --paper-2: light-dark(#f0f3ed, #242720);
+      --text: light-dark(#20241f, #eef1ea);
+      --muted: light-dark(#626a60, #abb3a7);
+      --line: light-dark(#dce2d8, #383d35);
+      --green: light-dark(#256b45, #75d49f);
+      --green-soft: light-dark(#e6f3ea, #183225);
+      --amber: light-dark(#8a5a12, #f2bf68);
+      --blue: light-dark(#315f90, #8fc7ff);
+      --code: light-dark(#18211b, #dce8de);
+      --shadow: 0 12px 32px rgba(18, 30, 20, .08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.72;
+    }
+    .shell { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+    header {
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow { color: var(--green); font-weight: 750; letter-spacing: .08em; font-size: 13px; }
+    h1 { margin: 8px 0 12px; font-size: clamp(30px, 5vw, 48px); line-height: 1.12; letter-spacing: -.03em; }
+    h2 { margin: 0 0 14px; font-size: 25px; line-height: 1.25; }
+    h3 { margin: 24px 0 8px; font-size: 18px; }
+    p { margin: 8px 0; }
+    .lede { max-width: 720px; color: var(--muted); font-size: 17px; }
+    .status { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+    .tag { padding: 6px 11px; border-radius: 999px; background: var(--paper-2); color: var(--muted); font-size: 13px; }
+    nav { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0; }
+    nav a { color: var(--green); text-decoration: none; border-bottom: 1px solid transparent; }
+    nav a:hover { border-color: currentColor; }
+    section {
+      margin-top: 18px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--paper);
+    }
+    .goal-grid, .task-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+    .mini { padding: 16px; border-radius: 14px; background: var(--paper-2); }
+    .mini strong { display: block; margin-bottom: 4px; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { color: var(--code); }
+    pre {
+      margin: 14px 0;
+      padding: 16px 18px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper-2);
+      line-height: 1.55;
+    }
+    .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 13px 0; }
+    .token { padding: 8px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-2); font-family: ui-monospace, monospace; }
+    .arrow { color: var(--muted); }
+    .callout { margin: 16px 0; padding: 14px 16px; border-left: 4px solid var(--amber); background: var(--paper-2); border-radius: 0 12px 12px 0; }
+    .explorer { margin-top: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper-2); }
+    .token-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 18px; }
+    button {
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 12px;
+      background: var(--paper);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover, button[aria-pressed="true"] { border-color: var(--green); color: var(--green); }
+    .bars { display: grid; gap: 10px; }
+    .bar-row { display: grid; grid-template-columns: 72px 1fr 58px; gap: 10px; align-items: center; }
+    .track { height: 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+    .fill { height: 100%; background: var(--green); border-radius: inherit; transition: width .25s ease; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: var(--muted); font-weight: 650; }
+    ol, ul { padding-left: 22px; }
+    li + li { margin-top: 7px; }
+    .checklist { list-style: none; padding: 0; }
+    .checklist li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+    .checklist input { margin-top: 6px; accent-color: var(--green); }
+    .question { padding: 16px; margin-top: 10px; border: 1px solid var(--line); border-radius: 12px; }
+    footer { color: var(--muted); text-align: center; margin-top: 28px; font-size: 13px; }
+    @media (max-width: 680px) {
+      .shell { padding: 18px 12px 50px; }
+      header, section { padding: 20px; border-radius: 15px; }
+      .goal-grid, .task-grid { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: 58px 1fr 48px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">MINI-LLM · M1B</div>
+      <h1>手搓字符级 Bigram 计数模型</h1>
+      <p class="lede">我们先做一个“文字接龙器”：看看一个字后面通常跟什么字，再照着这些次数随机接下去。暂时不用神经网络，也不用 PyTorch。</p>
+      <div class="status">
+        <span class="tag">状态：已完成</span>
+        <span class="tag">只用 Python 标准库</span>
+        <span class="tag">不使用 GPU</span>
+      </div>
+    </header>
+
+    <nav aria-label="章节导航">
+      <a href="#plain-words">先看人话词典</a>
+      <a href="#concept">Bigram</a>
+      <a href="#special">BOS / EOS</a>
+      <a href="#count">计数</a>
+      <a href="#explore">概率演示</a>
+      <a href="#coding">编程任务</a>
+      <a href="#questions">思考题</a>
+    </nav>
+
+    <section>
+      <h2>本节完成后，你应该能做到</h2>
+      <div class="goal-grid">
+        <div class="mini"><strong>记次数</strong>数一数每个字后面分别出现过什么字、出现几次。</div>
+        <div class="mini"><strong>换成比例</strong>例如“猫”出现 2 次、“狗”出现 1 次，就是 2/3 和 1/3。</div>
+        <div class="mini"><strong>做文字接龙</strong>按这些比例随机选择下一个字，拼出一句话。</div>
+        <div class="mini"><strong>知道它的缺点</strong>它只记得前一个字，记不住更长的上文。</div>
+      </div>
+    </section>
+
+    <section id="plain-words">
+      <h2>先看这张“人话词典”</h2>
+      <p>下面的词只是给简单动作起了名字。先理解左边，右边的英文可以慢慢熟悉。</p>
+      <table>
+        <thead><tr><th>它实际在做什么</th><th>以后会看到的名称</th></tr></thead>
+        <tbody>
+          <tr><td>只看前一个字，猜下一个字</td><td>Bigram 模型</td></tr>
+          <tr><td>放一张“句子从这里开始”的牌子</td><td>&lt;BOS&gt;</td></tr>
+          <tr><td>放一张“句子到这里结束”的牌子</td><td>&lt;EOS&gt;</td></tr>
+          <tr><td>记录“爱后面出现猫 2 次、狗 1 次”</td><td>计数</td></tr>
+          <tr><td>把 2 次和 1 次换成 2/3 和 1/3</td><td>转换为概率</td></tr>
+          <tr><td>按 2:1 的机会随机选择猫或狗</td><td>按权重抽样</td></tr>
+          <tr><td>给每个 token 编一个整数号码</td><td>token ID</td></tr>
+          <tr><td>程序自动检查结果是否符合预期</td><td>assert</td></tr>
+          <tr><td>规定一句话最多生成多少个字，防止程序一直循环</td><td>max_length</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="concept">
+      <h2>1. 先做最简单的文字接龙</h2>
+      <p>看到“我爱猫”，我们先不研究整句话的含义，只把相邻的字两两拿出来：</p>
+      <div class="flow" aria-label="我到爱，爱到猫">
+        <span class="token">我</span><span class="arrow">→</span><span class="token">爱</span><span class="arrow">→</span><span class="token">猫</span>
+      </div>
+      <p>于是记下两条接龙记录：<code>我后面是爱</code>，<code>爱后面是猫</code>。</p>
+      <p>这种“只看前一个 token，再猜下一个 token”的模型，技术名称叫 <strong>Bigram</strong>：</p>
+      <pre>P(next token | previous token)</pre>
+      <div class="callout">它的记忆只有一个 token。无论前面是“我爱”还是“你爱”，它都只记得最后的“爱”，所以会使用同一套“爱后面接什么”的次数。</div>
+    </section>
+
+    <section id="special">
+      <h2>2. 给句子插上“开始牌”和“结束牌”</h2>
+      <p>如果只记录普通汉字，程序不知道一句话的第一个字应该怎么选，也不知道什么时候该停。于是我们人为加两张不会显示在最终句子里的牌子：</p>
+      <ul>
+        <li><code>&lt;BOS&gt;</code>：Beginning Of Sequence，句子开始。</li>
+        <li><code>&lt;EOS&gt;</code>：End Of Sequence，句子结束。</li>
+      </ul>
+      <p>“我爱猫”在统计时变为：</p>
+      <div class="flow">
+        <span class="token">&lt;BOS&gt;</span><span class="arrow">→</span><span class="token">我</span><span class="arrow">→</span><span class="token">爱</span><span class="arrow">→</span><span class="token">猫</span><span class="arrow">→</span><span class="token">&lt;EOS&gt;</span>
+      </div>
+      <p>生成时先站在 BOS 这张开始牌上，抽到 EOS 这张结束牌时就停。为了让程序能处理它们，BOS 和 EOS 也要像普通字一样拥有 token ID。</p>
+    </section>
+
+    <section id="count">
+      <h2>3. 做一张“接龙记分表”</h2>
+      <pre>我爱猫
+我爱狗
+你爱猫</pre>
+      <p>展开后：</p>
+      <pre>&lt;BOS&gt; → 我 → 爱 → 猫 → &lt;EOS&gt;
+&lt;BOS&gt; → 我 → 爱 → 狗 → &lt;EOS&gt;
+&lt;BOS&gt; → 你 → 爱 → 猫 → &lt;EOS&gt;</pre>
+      <table>
+        <thead><tr><th>当前 token</th><th>下一个 token</th><th>次数</th></tr></thead>
+        <tbody>
+          <tr><td>&lt;BOS&gt;</td><td>我</td><td>2</td></tr>
+          <tr><td>&lt;BOS&gt;</td><td>你</td><td>1</td></tr>
+          <tr><td>我</td><td>爱</td><td>2</td></tr>
+          <tr><td>你</td><td>爱</td><td>1</td></tr>
+          <tr><td>爱</td><td>猫</td><td>2</td></tr>
+          <tr><td>爱</td><td>狗</td><td>1</td></tr>
+          <tr><td>猫</td><td>&lt;EOS&gt;</td><td>2</td></tr>
+          <tr><td>狗</td><td>&lt;EOS&gt;</td><td>1</td></tr>
+        </tbody>
+      </table>
+      <p>这张表要回答的问题是：“当前是某个 token 时，下一个 token 各出现过几次？”</p>
+      <p>在代码里，我们用二维列表保存它：</p>
+      <pre>counts[current_id][next_id]</pre>
+      <p>第一个位置表示“现在是哪个 token”，第二个位置表示“接下来是哪个 token”。开始时所有格子都是 0，因为还没读任何句子。每看到一次相邻组合，就把对应格子加 1。</p>
+      <p>例如，读到“爱猫”：</p>
+      <pre>counts[爱的ID][猫的ID] += 1</pre>
+    </section>
+
+    <section id="explore">
+      <h2>4. 把“出现几次”换成“有多大机会”</h2>
+      <p>点击一个当前 token，看看它后面有哪些选择。横条越长，被随机选中的机会越大。</p>
+      <div class="explorer">
+        <div class="token-buttons" id="token-buttons"></div>
+        <div id="selected-label" aria-live="polite"></div>
+        <div class="bars" id="probability-bars"></div>
+      </div>
+      <p>换算方法只是“某个选择的次数除以全部次数”：</p>
+      <pre>某个 next token 的概率 = 对应计数 / 当前行的计数总和</pre>
+      <div class="callout">它可能拼出语料里没有的“你爱狗”。原因是它一步一步检查时，开始后出现过“你”，“你”后出现过“爱”，“爱”后出现过“狗”。它不会回头检查完整的“你爱”后面是否真的出现过“狗”。</div>
+    </section>
+
+    <section id="coding">
+      <h2>5. 编程任务</h2>
+      <p>建议文件名：<code>m1/bigram_count.py</code></p>
+      <p>只允许使用 Python 自带的功能。不要一次写完整程序，每完成一步就打印结果检查：</p>
+      <ol>
+        <li>保存三个训练句子。</li>
+        <li>收集不重复汉字，加入 <code>&lt;BOS&gt;</code> 和 <code>&lt;EOS&gt;</code>。</li>
+        <li>建立两张对照表：token → ID，以及 ID → token。常见变量名才叫 <code>stoi</code> 和 <code>itos</code>。</li>
+        <li>创建一张全零的二维记分表：每一行代表“当前 token”，每一列代表“下一个 token”。</li>
+        <li>逐句查看相邻 token，每见到一次就把对应格子加 1。</li>
+        <li>写一个函数：输入当前 token，把它后面各个选择的次数换成比例。</li>
+        <li>先从 BOS 的选择中随机抽一个 token，然后不断接龙；抽到 EOS 就结束。</li>
+        <li>生成 10 句。用固定随机种子让结果可以重复，用 <code>max_length</code> 防止错误代码无限循环。</li>
+      </ol>
+      <h3>让程序自己帮你核对答案</h3>
+      <p><code>assert</code> 的意思是：“我认为这个结果必须成立；如果不成立就立刻报错。”请检查：</p>
+      <pre>counts[爱][猫] == 2
+counts[爱][狗] == 1
+counts[你][爱] == 1
+counts[猫][EOS] == 2
+
+P(猫 | 爱) ≈ 2/3
+P(狗 | 爱) ≈ 1/3
+生成长度不超过 max_length</pre>
+      <p>浮点数可能得到 0.6666666667，因此检查“非常接近 2/3”即可，不要求完全相等。</p>
+      <p>本课约定：<code>max_length</code> 只计算真正生成的汉字，不包括 BOS 和 EOS；最终返回的句子也不要包含这两个标记。检查 10 个句子时，可以用 <code>all(...)</code> 表示“每一个都符合要求”：</p>
+      <pre>samples = ten_seq(...)
+assert all(len(sentence) &lt;= max_length for sentence in samples)</pre>
+    </section>
+
+    <section>
+      <h2>6. 提交前检查</h2>
+      <ul class="checklist">
+        <li><input type="checkbox"><span>只使用 Python 标准库，没有使用 PyTorch 或 NumPy。</span></li>
+        <li><input type="checkbox"><span>打印词表、stoi 和 itos。</span></li>
+        <li><input type="checkbox"><span>打印所有非零 Bigram 计数。</span></li>
+        <li><input type="checkbox"><span>打印“句子开始后各 token 的概率”和“爱后面各 token 的概率”。</span></li>
+        <li><input type="checkbox"><span>使用固定随机种子生成 10 个句子。</span></li>
+        <li><input type="checkbox"><span>全部 assert 通过。</span></li>
+      </ul>
+    </section>
+
+    <section id="questions">
+      <h2>7. 三道思考题</h2>
+      <div class="question"><strong>题 1</strong><br>这个接龙模型每次猜下一个 token 时，能记住前面几个 token？</div>
+      <div class="question"><strong>题 2</strong><br>为什么本节得到 <code>P(猫 | 爱)=2/3</code>，而 M1A 得到 <code>P(猫 | 我爱)=1/2</code>？</div>
+      <div class="question"><strong>题 3</strong><br>为什么模型可能生成训练语料中没有出现过的“你爱狗”？</div>
+    </section>
+
+    <section>
+      <h2>8. 提交内容</h2>
+      <ol>
+        <li><code>bigram_count.py</code> 完整代码；</li>
+        <li>程序运行输出；</li>
+        <li>所有 assert 通过的证据；</li>
+        <li>四道思考题答案；</li>
+        <li>调试过程中遇到的问题。</li>
+      </ol>
+      <p>通过后进入 M1C：训练集、验证集，以及如何用一个数字评价语言模型预测得好不好。</p>
+    </section>
+
+    <footer>M1B · Mini-LLM 从零构建课程</footer>
+  </main>
+
+  <script>
+    const transitions = {
+      '<BOS>': [['我', 2], ['你', 1]],
+      '我': [['爱', 2]],
+      '你': [['爱', 1]],
+      '爱': [['猫', 2], ['狗', 1]],
+      '猫': [['<EOS>', 2]],
+      '狗': [['<EOS>', 1]]
+    };
+    const buttons = document.getElementById('token-buttons');
+    const bars = document.getElementById('probability-bars');
+    const selectedLabel = document.getElementById('selected-label');
+
+    function showToken(token) {
+      const rows = transitions[token];
+      const total = rows.reduce((sum, row) => sum + row[1], 0);
+      selectedLabel.innerHTML = '<strong>当前 token：</strong><code>' + token.replaceAll('<', '&lt;').replaceAll('>', '&gt;') + '</code>';
+      bars.innerHTML = '';
+      rows.forEach(([next, count]) => {
+        const probability = count / total;
+        const row = document.createElement('div');
+        row.className = 'bar-row';
+        const safeNext = next.replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+        row.innerHTML = '<code>' + safeNext + '</code><div class="track"><div class="fill" style="width:' + (probability * 100) + '%"></div></div><strong>' + count + '/' + total + '</strong>';
+        bars.appendChild(row);
+      });
+      buttons.querySelectorAll('button').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.token === token));
+      });
+    }
+
+    Object.keys(transitions).forEach(token => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.token = token;
+      button.textContent = token;
+      button.setAttribute('aria-pressed', 'false');
+      button.addEventListener('click', () => showToken(token));
+      buttons.appendChild(button);
+    });
+    showToken('<BOS>');
+  </script>
+</body>
+</html>

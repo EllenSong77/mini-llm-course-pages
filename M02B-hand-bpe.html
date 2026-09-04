@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M2B · 手工执行 BPE</title>
+  <link rel="stylesheet" href="assets/course.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">MINI-LLM · M2B</div>
+      <h1>让语料自己告诉我们，哪些字符该抱团</h1>
+      <p class="lede">BPE 从很小的片段开始，反复寻找最常一起出现的相邻 token，把它们合并成一个新 token。常见片段因此越变越完整，罕见内容仍能退回小片段表示。</p>
+      <div class="status"><span class="tag">状态：教材已准备</span><span class="tag">核心算法：统计 → 选择 → 合并</span><span class="tag">只实现教学版</span></div>
+      <div class="actions"><a class="button secondary" href="index.html">返回课程入口</a><a class="button secondary" href="M02A-tokenizer-map.html">上一节</a></div>
+    </header>
+
+    <nav class="jump"><a href="#corpus">语料</a><a href="#rounds">三轮合并</a><a href="#meaning">学到了什么</a><a href="#code">代码</a><a href="#submit">验收</a></nav>
+
+    <section>
+      <h2>先看 BPE 的全部核心</h2>
+      <div class="flow"><span>把词拆小</span><b>→</b><span>统计所有相邻对</span><b>→</b><span>找出现最多的一对</span><b>→</b><span>全局合并</span><b>→</b><span>重复</span></div>
+      <p>这里的 BPE 是 Byte Pair Encoding 的名字，但为了先看清算法，我们从中文字符开始，而不是直接处理原始 byte。工程版会交给 SentencePiece。</p>
+    </section>
+
+    <section id="corpus">
+      <h2>1. 一份带出现次数的小语料</h2>
+      <pre>机器学习 × 3
+机器视觉 × 2
+深度学习 × 1</pre>
+      <p>初始时，每句话都按字符拆开：</p>
+      <pre>[机, 器, 学, 习] × 3
+[机, 器, 视, 觉] × 2
+[深, 度, 学, 习] × 1</pre>
+      <p>“×3”非常重要：它表示这句话在语料里出现 3 次，所以其中每个相邻对都要贡献 3 次计数。</p>
+      <table>
+        <thead><tr><th>相邻 token 对</th><th>总次数</th><th>次数从哪里来</th></tr></thead>
+        <tbody>
+          <tr><td><code>机 + 器</code></td><td>5</td><td>机器学习 3 次 + 机器视觉 2 次</td></tr>
+          <tr><td><code>学 + 习</code></td><td>4</td><td>机器学习 3 次 + 深度学习 1 次</td></tr>
+          <tr><td><code>器 + 学</code></td><td>3</td><td>机器学习 3 次</td></tr>
+          <tr><td><code>器 + 视</code></td><td>2</td><td>机器视觉 2 次</td></tr>
+          <tr><td><code>视 + 觉</code></td><td>2</td><td>机器视觉 2 次</td></tr>
+          <tr><td><code>深 + 度</code></td><td>1</td><td>深度学习 1 次</td></tr>
+          <tr><td><code>度 + 学</code></td><td>1</td><td>深度学习 1 次</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="rounds">
+      <h2>2. 手工执行前三轮</h2>
+      <h3>第 1 轮：合并“机 + 器”</h3>
+      <p>它出现 5 次，是当前冠军。把语料中的相邻 <code>机, 器</code> 全部替换成一个新 token <code>机器</code>：</p>
+      <pre>[机器, 学, 习] × 3
+[机器, 视, 觉] × 2
+[深, 度, 学, 习] × 1</pre>
+
+      <h3>第 2 轮：重新统计，再合并“学 + 习”</h3>
+      <p>每次合并后必须重新统计，因为 token 边界已经变了。现在 <code>学 + 习</code> 出现 4 次：</p>
+      <pre>[机器, 学习] × 3
+[机器, 视, 觉] × 2
+[深, 度, 学习] × 1</pre>
+
+      <h3>第 3 轮：合并“机器 + 学习”</h3>
+      <p>现在它出现 3 次：</p>
+      <pre>[机器学习] × 3
+[机器, 视, 觉] × 2
+[深, 度, 学习] × 1</pre>
+      <div class="callout green">新 token 不一定是语言学意义上的完整“词”。BPE 只根据训练语料中的频率做合并；数据不同，学到的 merge 顺序也不同。</div>
+    </section>
+
+    <section id="meaning">
+      <h2>3. 每次 merge 实际改变了什么</h2>
+      <div class="grid">
+        <div class="card"><strong>词表多一个 token</strong><p>例如合并后新增 <code>机器</code>，原来的 <code>机</code> 和 <code>器</code> 通常仍保留，用于表示其他内容。</p></div>
+        <div class="card"><strong>常见文本少一个位置</strong><p><code>[机, 器]</code> 变成 <code>[机器]</code>，以后序列更短。</p></div>
+        <div class="card"><strong>模型承担更大的词表</strong><p>每增加一种 token，embedding/输出层就多一行相关参数。</p></div>
+        <div class="card"><strong>merge 顺序必须保存</strong><p>编码新文本时要重放同一套规则，不能临时重新猜。</p></div>
+      </div>
+      <p>BPE 的核心取舍正是：花更大的词表，换取常见文本更短的 token 序列。</p>
+    </section>
+
+    <section id="code">
+      <h2>4. 教学版代码：只写核心循环</h2>
+      <p>新建 <code>m2/hand_bpe.py</code>。语料使用“token 列表 + 频率”的形式：</p>
+      <pre>corpus = [
+    (["机", "器", "学", "习"], 3),
+    (["机", "器", "视", "觉"], 2),
+    (["深", "度", "学", "习"], 1),
+]</pre>
+
+      <h3>函数 1：统计相邻对</h3>
+      <pre>from collections import defaultdict
+
+
+def count_pairs(corpus):
+    counts = defaultdict(int)
+    for tokens, frequency in corpus:
+        for left, right in zip(tokens, tokens[1:]):
+            # TODO：这一对要增加多少次？
+            ...
+    return dict(counts)</pre>
+
+      <h3>函数 2：在一句话中合并指定 token 对</h3>
+      <pre>def merge_tokens(tokens, pair):
+    merged = []
+    i = 0
+    while i &lt; len(tokens):
+        if i + 1 &lt; len(tokens) and (tokens[i], tokens[i + 1]) == pair:
+            # TODO：把这两个 token 拼成一个，并一次跨过两个位置
+            ...
+        else:
+            # TODO：保留当前 token，并向后走一个位置
+            ...
+    return merged</pre>
+
+      <h3>函数 3：执行若干轮</h3>
+      <pre>def train_bpe(corpus, num_merges):
+    working = [(tokens.copy(), frequency) for tokens, frequency in corpus]
+    merge_rules = []
+
+    for round_id in range(num_merges):
+        pair_counts = count_pairs(working)
+        if not pair_counts:
+            break
+
+        # sorted 让“次数相同”的情况也能稳定得到同一结果
+        best_pair = max(sorted(pair_counts), key=pair_counts.get)
+        merge_rules.append(best_pair)
+        working = [
+            (merge_tokens(tokens, best_pair), frequency)
+            for tokens, frequency in working
+        ]
+        print(round_id + 1, best_pair, pair_counts[best_pair], working)
+
+    return working, merge_rules
+
+
+final_corpus, rules = train_bpe(corpus, num_merges=3)
+assert rules == [("机", "器"), ("学", "习"), ("机器", "学习")]
+assert final_corpus[0][0] == ["机器学习"]</pre>
+      <div class="callout">这里只验证 BPE 最重要的三件事：频率加权统计、选出最高频相邻对、合并后重新统计。生产级的 Unicode、特殊 token、并发、文件格式和解码交给成熟库。</div>
+    </section>
+
+    <section>
+      <h2>5. 一个故障实验</h2>
+      <p>故意把 <code>counts[(left, right)] += frequency</code> 改成每次只加 <code>1</code>，再运行三轮。</p>
+      <p>观察 merge 顺序是否变化，并解释：如果忽略每句话的出现频率，算法实际回答的就不再是“整份训练语料中哪一对最常见”，而是“这一对出现在多少种不同句子里”。</p>
+    </section>
+
+    <section>
+      <h2>6. 三个问题</h2>
+      <div class="question"><strong>题 1</strong><br>为什么每完成一次 merge 都必须重新统计相邻 token 对？</div>
+      <div class="question"><strong>题 2</strong><br>把“机器”合成一个 token 后，为什么通常仍要在基础词表里保留“机”和“器”？</div>
+      <div class="question"><strong>题 3</strong><br>BPE 为什么能让常见文本变短，却不能保证每个 token 都符合人类语言学里的“词”？</div>
+    </section>
+
+    <section id="submit">
+      <h2>7. 提交与验收</h2>
+      <ol>
+        <li><code>m2/hand_bpe.py</code>，两个 assert 通过。</li>
+        <li>前三轮打印结果。</li>
+        <li>故障实验的输出变化与原因。</li>
+        <li>三个问题的答案。</li>
+      </ol>
+      <p>完成标准：你能拿任意一份极小语料，人工核对代码的 pair count 和 merge 是否正确。</p>
+    </section>
+    <footer>M2B · 下一节：工程版中英双语 tokenizer</footer>
+  </main>
+</body>
+</html>

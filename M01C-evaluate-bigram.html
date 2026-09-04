@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M1C · 怎样评价语言模型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f7f7f4, #121311);
+      --paper: light-dark(#fff, #1b1d1a);
+      --paper2: light-dark(#f0f3ed, #242720);
+      --text: light-dark(#20241f, #eef1ea);
+      --muted: light-dark(#626a60, #abb3a7);
+      --line: light-dark(#dce2d8, #383d35);
+      --green: light-dark(#256b45, #75d49f);
+      --amber: light-dark(#8a5a12, #f2bf68);
+      --red: light-dark(#9b3f39, #ff9b92);
+      --shadow: 0 12px 32px rgba(18,30,20,.08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; line-height: 1.72; }
+    .shell { max-width: 940px; margin: 0 auto; padding: 40px 24px 80px; }
+    header, section { background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+    header { padding: 34px; box-shadow: var(--shadow); }
+    section { margin-top: 18px; padding: 28px; }
+    .eyebrow { color: var(--green); font-weight: 750; letter-spacing: .08em; font-size: 13px; }
+    h1 { margin: 8px 0 12px; font-size: clamp(30px,5vw,46px); line-height: 1.12; letter-spacing: -.03em; }
+    h2 { margin: 0 0 14px; font-size: 25px; line-height: 1.3; }
+    h3 { margin: 22px 0 8px; font-size: 18px; }
+    p { margin: 8px 0; }
+    .lede { color: var(--muted); max-width: 710px; font-size: 17px; }
+    .status, nav { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .tag { padding: 6px 11px; border-radius: 999px; background: var(--paper2); color: var(--muted); font-size: 13px; }
+    nav { margin: 20px 0; }
+    nav a { color: var(--green); text-decoration: none; }
+    .grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+    .card { background: var(--paper2); border-radius: 14px; padding: 16px; }
+    .card strong { display: block; margin-bottom: 4px; }
+    code, pre { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    pre { padding: 16px 18px; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--paper2); line-height: 1.55; }
+    .callout { margin: 16px 0; padding: 14px 16px; border-left: 4px solid var(--amber); background: var(--paper2); border-radius: 0 12px 12px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: var(--muted); }
+    ol, ul { padding-left: 22px; }
+    li + li { margin-top: 7px; }
+    .meter { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper2); }
+    input[type="range"] { width: 100%; accent-color: var(--green); }
+    .meter-line { display: flex; justify-content: space-between; gap: 16px; margin-top: 10px; }
+    .value { font-size: 22px; font-weight: 750; }
+    .good { color: var(--green); }
+    .bad { color: var(--red); }
+    .question { padding: 16px; margin-top: 10px; border: 1px solid var(--line); border-radius: 12px; }
+    footer { text-align: center; color: var(--muted); margin-top: 28px; font-size: 13px; }
+    @media (max-width: 680px) { .shell { padding: 18px 12px 50px; } header,section { padding: 20px; } .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">MINI-LLM · M1C</div>
+      <h1>模型生成得像样，不代表预测得好</h1>
+      <p class="lede">只抽查几条生成样本，评价太不稳定。这一节给每一次“猜下一个 token”打分，再把所有分数平均，得到一个能稳定比较的模型成绩。</p>
+      <div class="status"><span class="tag">状态：已完成</span><span class="tag">新增标准库：math</span><span class="tag">继续使用 Bigram</span></div>
+    </header>
+
+    <nav><a href="#split">训练集与验证集</a><a href="#score">怎样打分</a><a href="#log">为什么用 log</a><a href="#task">代码任务</a><a href="#questions">思考题</a></nav>
+
+    <section>
+      <h2>先说这节到底要解决什么</h2>
+      <div class="grid">
+        <div class="card"><strong>不能只看生成样本</strong>同一个模型每次随机生成的句子可能不同，肉眼很难稳定比较。</div>
+        <div class="card"><strong>要看模型给真实答案的概率有多大</strong>真实下一个 token 是“猫”，模型给“猫”的概率越高，这次预测越好。</div>
+        <div class="card"><strong>训练数据和考试数据分开</strong>模型用训练集学习，用没有参与学习的验证集检查表现。</div>
+        <div class="card"><strong>最后得到一个平均分</strong>把每一步预测的损失加起来，再除以预测次数。</div>
+      </div>
+    </section>
+
+    <section id="split">
+      <h2>1. 训练集是练习题，验证集是模拟考试</h2>
+      <p>本节使用：</p>
+      <pre>训练集：我爱猫、我爱狗、你爱猫
+验证集：你爱狗</pre>
+      <p>计数表只能根据训练集建立。验证集不能拿去增加计数，否则相当于先看了考试答案，再声称考试成绩很好。</p>
+      <div class="callout">验证集可以用来比较模型和选择方案，但不能用来更新当前模型的计数。</div>
+    </section>
+
+    <section id="score">
+      <h2>2. 每一步只检查真实答案的概率</h2>
+      <p>验证句子“你爱狗”会被拆成：</p>
+      <pre>&lt;BOS&gt; → 你
+你 → 爱
+爱 → 狗
+狗 → &lt;EOS&gt;</pre>
+      <p>当真实答案是“狗”时，模型也许给出了：</p>
+      <pre>猫：2/3
+狗：1/3</pre>
+      <p>这一步只取真实答案“狗”的概率，也就是 <code>1/3</code>。真实答案的概率越大，说明模型这一步猜得越好。该给这样的概率打几分？下一节把它换算成损失。</p>
+    </section>
+
+    <section id="log">
+      <h2>3. 为什么把概率变成负对数</h2>
+      <p>这一步的损失定义如下：</p>
+      <pre>这一步的损失 = -log(模型给真实答案的概率)</pre>
+      <p>先记住下表的大致对应关系，不需要背对数性质：</p>
+      <table>
+        <thead><tr><th>真实答案概率</th><th>-log(概率)</th><th>评价</th></tr></thead>
+        <tbody><tr><td>0.9</td><td>约 0.11</td><td>猜得好，损失小</td></tr><tr><td>0.5</td><td>约 0.69</td><td>一般</td></tr><tr><td>0.1</td><td>约 2.30</td><td>猜得差，损失大</td></tr></tbody>
+      </table>
+      <div class="meter">
+        <label for="probability"><strong>拖动滑块：改变模型给真实答案的概率</strong></label>
+        <input id="probability" type="range" min="1" max="100" value="33">
+        <div class="meter-line"><span>真实答案概率：<span id="p-value" class="value">0.33</span></span><span>损失：<span id="loss-value" class="value">1.11</span></span></div>
+        <p id="judgement" class="bad">给真实答案的概率偏低，所以损失较大。</p>
+      </div>
+      <p>使用 log 的重要原因是：一句话包含许多次预测，原本要把许多概率相乘；取 log 后可以改成逐项相加，数值也更容易处理。前面加负号，是为了让“越好越接近 0”。</p>
+      <p>整个数据集的最终成绩：</p>
+      <pre>平均损失 = 所有步骤的损失之和 / 预测步骤总数</pre>
+      <div class="callout">这个指标常叫平均负对数似然，英文缩写 NLL。名字可以以后再记，先理解“真实答案概率越高，平均损失越低”。</div>
+    </section>
+
+    <section id="task">
+      <h2>4. 代码任务</h2>
+      <p>在 <code>bigram_count.py</code> 的改进版下面继续写。先添加：</p>
+      <pre>import math</pre>
+      <p>实现：</p>
+      <pre>def average_nll(sentences, token_to_id, counts):
+    ...</pre>
+      <p>函数按以下步骤工作：</p>
+      <ol>
+        <li>对每句话加上 BOS 和 EOS。</li>
+        <li>逐个取出“当前 token → 真实下一个 token”。</li>
+        <li>从计数表中得到真实下一个 token 的概率。</li>
+        <li>累加 <code>-math.log(probability)</code>。</li>
+        <li>记录一共评价了多少次预测。</li>
+        <li>返回“总损失 ÷ 预测次数”。</li>
+      </ol>
+      <p>然后计算并打印：</p>
+      <pre>train_loss = average_nll(s_list, improved_stoi, improved_counts)
+validation_sentences = ["你爱狗"]
+validation_loss = average_nll(validation_sentences, improved_stoi, improved_counts)
+
+print("训练集平均损失:", train_loss)
+print("验证集平均损失:", validation_loss)</pre>
+      <h3>测试要求</h3>
+      <pre>assert train_loss &gt;= 0
+assert validation_loss &gt;= 0
+assert train_loss &lt; validation_loss</pre>
+      <p>最后一项在当前固定语料和模型中应该成立。它只是本节语料上的事实，不是普适定律——换一个模型或数据集，训练损失未必仍低于验证损失。</p>
+      <p>如果真实转移的计数为 0，先让函数返回 <code>float("inf")</code>，表示模型把真实答案判断为不可能。平滑方法后续再学。</p>
+    </section>
+
+    <section id="questions">
+      <h2>5. 三道思考题</h2>
+      <div class="question"><strong>题 1</strong><br>为什么不能用验证句子“你爱狗”更新计数表，然后再评价它？</div>
+      <div class="question"><strong>题 2</strong><br>模型没有在训练集中见过完整句子“你爱狗”，为什么它仍能为这句话的每一步计算出非零概率？</div>
+      <div class="question"><strong>题 3</strong><br>平均 NLL 越低表示什么？回答时请围绕“模型给真实答案的概率”来展开。</div>
+    </section>
+
+    <section>
+      <h2>6. 提交内容</h2>
+      <ol><li><code>average_nll()</code> 代码；</li><li>训练集与验证集损失输出；</li><li>三项 assert 通过；</li><li>三道思考题答案。</li></ol>
+    </section>
+    <footer>M1C · Mini-LLM 从零构建课程</footer>
+  </main>
+  <script>
+    const slider = document.getElementById('probability');
+    const pValue = document.getElementById('p-value');
+    const lossValue = document.getElementById('loss-value');
+    const judgement = document.getElementById('judgement');
+    function updateMeter() {
+      const p = Number(slider.value) / 100;
+      const loss = -Math.log(p);
+      pValue.textContent = p.toFixed(2);
+      lossValue.textContent = loss.toFixed(2);
+      const good = p >= 0.6;
+      judgement.textContent = good ? '给真实答案的概率较高，所以损失较小。' : '给真实答案的概率偏低，所以损失较大。';
+      judgement.className = good ? 'good' : 'bad';
+    }
+    slider.addEventListener('input', updateMeter);
+    updateMeter();
+  </script>
+</body>
+</html>
