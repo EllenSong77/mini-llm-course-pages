@@ -3,246 +3,334 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>M1D · 可训练的 Bigram（人话版）</title>
+  <title>M1D · 跟着代码一步一步训练 Bigram</title>
   <link rel="stylesheet" href="assets/course.css">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="assets/favicon-180.png">
-
 </head>
 <body>
-  <main class="shell">
-    <header>
-      <div class="eyebrow">MINI-LLM · M1D</div>
-      <h1>这次不数答案，让模型自己学</h1>
-      <p class="lede">M1B 你亲手数出一张表；M1C 你给模型打的分算出了一个 loss。这一节把“数出来的表”换成“一开始随便填的表”，用 loss 当老师，一步一步把它教对。这个“教”的过程，就叫训练。</p>
-      <div class="status"><span class="tag current">当前任务</span><span class="tag">第一次用 PyTorch</span><span class="tag">完成后：M1 结束</span></div>
-      <div class="actions"><a class="button secondary" href="index.html">返回课程入口</a></div>
-    </header>
+<main class="shell">
+<header>
+  <div class="eyebrow">MINI-LLM · M1D · 代码逐步讲解版</div>
+  <h1>一段一段写出可训练的 Bigram</h1>
 
-    <nav class="jump"><a href="#story">一句话</a><a href="#change">两张表</a><a href="#loop">训练五步</a><a href="#apis">新面孔对照</a><a href="#shape">四个形状</a><a href="#task">动手任务</a><a href="#payoff">收官对照</a><a href="#submit">验收</a></nav>
+<p>这一节直接跟着代码走。<strong>每次只在 <code>m1/trainable_bigram.py</code> 末尾追加一段，运行整个文件，再看这一段的解释。</strong> 第 1–11 步可以按顺序拼成完整脚本，没有需要猜的 TODO。用 CPU 即可。</p>
+<p>我们继续使用“我爱猫、我爱狗、你爱猫”。这次要亲眼看到：模型给“猫”的概率，怎样从初始值变到接近 2/3。</p>
+<p>先完成第 1–7 步，看到一次参数修改，再继续后面的完整训练。每段下面的“对照着看”是阅读提示，不用逐条交作业。</p>
 
-    <section id="story">
-      <h2>本节一句话</h2>
-      <p>大模型里没有人在数“爱后面出现过几次猫”。它有的是一张<strong>一开始随机填好、可以不断修改的表</strong>，和一套自动改表的流程：</p>
-      <div class="flow"><span>查表</span><b>→</b><span>算 loss</span><b>→</b><span>算梯度</span><b>→</b><span>改表</span><b>→</b><span>再来一遍</span></div>
-      <p>本节用你已经熟悉的 Bigram 把这个流程完整走一遍。以后 300M 模型把表换成复杂的神经网络，但这套流程一步不多、一步不少。</p>
-    </section>
-
-    <section id="change">
-      <h2>1. 唯一的变化：表的来历</h2>
-      <table>
-        <thead><tr><th></th><th>M1B 计数模型</th><th>本节可训练模型</th></tr></thead>
-        <tbody>
-          <tr><td>表怎么来的</td><td>你一行行数出来的</td><td>一开始随机填，训练中慢慢改</td></tr>
-          <tr><td>表里的数字</td><td>真实出现次数：非负整数</td><td>模型自己打的分：可正可负，可大可小</td></tr>
-          <tr><td>怎么变成概率</td><td>次数 ÷ 行总和</td><td>softmax（下面解释）</td></tr>
-          <tr><td>完全一样的地方</td><td colspan="2">都只看前 1 个 token，预测下一个 token</td></tr>
-        </tbody>
-      </table>
-      <div class="callout"><strong>logit 就是“还没变成概率的分数”。</strong>它可以是负数，一整行加起来也不必等于 1。很多个分数合起来叫 logits。</div>
-      <div class="callout green"><strong>softmax 是“次数 ÷ 行总和”的替身。</strong>次数都是正的，直接除就行；分数可能是负数，不能直接除。softmax 分两步：先用指数函数把每个分数变成正数（大的还是大，小的还是小，只是全变正了），再除以总和。你不需要手算它，记住“一行分数进去，一行加起来等于 1 的概率出来”就够了。</div>
-    </section>
-
-    <section id="loop">
-      <h2>2. 训练一圈只有五步</h2>
-      <p>拿一个训练样本“爱 → 猫”走一圈：</p>
-      <ol>
-        <li><strong>查表</strong>：把“爱”的 ID 交给模型，拿回一行 7 个分数。</li>
-        <li><strong>打分</strong>：<code>F.cross_entropy(logits, 正确ID)</code> 做两件事：先把这行分数 softmax 成概率，再按 M1C 的算法算 <code>-log(真实答案的概率)</code>。它就是你手算过的那个 loss，被打包成了一个函数，数值上也更稳。</li>
-        <li><strong>算梯度</strong>：<code>loss.backward()</code> 对表里每个数字问同一个问题：“把你稍微加大一点，loss 会变高还是变低？变多快？”答案——方向加幅度——就叫<strong>梯度</strong>。</li>
-        <li><strong>改表</strong>：<code>optimizer.step()</code> 照着梯度，把每个数字往“loss 会降”的方向挪一小步。步子的大小叫 <strong>lr</strong>（learning rate，学习率），本节固定 1.0，照用即可；怎么选它是 M6 的事。</li>
-        <li>用全部 12 个样本重复 1–4。重复很多圈，loss 越来越低。</li>
-      </ol>
-      <div class="callout">每圈开头要 <code>optimizer.zero_grad()</code>：PyTorch 默认把新梯度<strong>累加</strong>在旧梯度上。不清零，这一圈的方向就和上一圈混在一起了。</div>
-      <div class="callout">只想看看 loss、不打算训练的时候（比如训练前后各测一次），用 <code>with torch.no_grad():</code> 把代码包起来，意思是“别准备改表要用的材料”。省内存，也算得快。训练循环里不需要它。</div>
-      <h3>梯度不是答案</h3>
-      <p>梯度不会告诉模型“把这个格子改成 2/3”。它只说方向和快慢。挪一小步、再看一次、再挪——绕，是这个方法的笨处，也是它能推广到几亿参数的原因。</p>
-    </section>
-
-    <section id="apis">
-      <h2>3. 新面孔对照表</h2>
-      <p>本节一口气出现不少 PyTorch 名字。它们不是新知识，大多是你已经写过的东西换了写法。对照着看，不用背：</p>
-      <table>
-        <thead><tr><th>你已经写过的（M1B / M1C）</th><th>本节的写法</th><th>一句话</th></tr></thead>
-        <tbody>
-          <tr><td>list 套 list 的 counts 表</td><td><code>nn.Embedding(7, 7)</code></td><td>同一张 7×7 表，交给 PyTorch 管才能被训练</td></tr>
-          <tr><td>次数 ÷ 行总和</td><td><code>F.softmax(行, dim=-1)</code></td><td>一行分数 → 一行和为 1 的概率</td></tr>
-          <tr><td><code>-math.log(p)</code></td><td><code>F.cross_entropy(logits, y)</code></td><td>softmax 加上 M1C 的 loss，打包成一个函数</td></tr>
-          <tr><td>（没有对应，新能力）</td><td><code>loss.backward()</code></td><td>算出每个数字该加还是减、动多少</td></tr>
-          <tr><td>（没有对应，新能力）</td><td><code>optimizer.step()</code></td><td>照梯度把数字挪一小步</td></tr>
-          <tr><td>（没有对应）</td><td><code>optimizer.zero_grad()</code></td><td>清掉上一轮梯度，防止累加</td></tr>
-          <tr><td><code>random.choices(候选, weights=概率)</code></td><td><code>torch.multinomial(probs, 1)</code></td><td>按概率抽 1 个，同一个意思</td></tr>
-          <tr><td><code>random.Random(seed)</code></td><td><code>torch.Generator().manual_seed(seed)</code></td><td>固定随机种子，同一个意思</td></tr>
-          <tr><td>（没有对应）</td><td><code>torch.no_grad()</code></td><td>“只算不改”模式</td></tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section id="shape">
-      <h2>4. 全节只需要盯住四个形状</h2>
-      <p><strong>tensor（张量）就是 PyTorch 里的数组</strong>：一维像 list，二维像嵌套 list。形状（shape）就是每一维的长度：<code>[12]</code> 是 12 个数排成一排，<code>[12, 7]</code> 是 12 行乘 7 列。</p>
-      <p>三句话的语料一共能切出 12 对“当前 → 下一个”，词表 7 个 token：</p>
-      <table>
-        <thead><tr><th>名字</th><th>形状</th><th>是什么</th></tr></thead>
-        <tbody>
-          <tr><td><code>x</code></td><td><code>[12]</code></td><td>12 个当前 token 的 ID（M1B 数据集的 PyTorch 版）</td></tr>
-          <tr><td><code>y</code></td><td><code>[12]</code></td><td>对应的 12 个正确答案 ID</td></tr>
-          <tr><td>表（<code>model.table</code>）</td><td><code>[7, 7]</code></td><td>那张可训练分数表，形状和 M1B 的 counts 一模一样</td></tr>
-          <tr><td><code>logits</code></td><td><code>[12, 7]</code></td><td>12 个样本各查一次表，各得一行 7 个分数</td></tr>
-        </tbody>
-      </table>
-      <div class="callout"><code>nn.Embedding(7, 7)</code> 在本节就是一张<strong>能被训练的 [7, 7] 查表</strong>：输入一个 ID，返回那一行。它的本职是“token → 向量”，那是 M5 的用法；本节借用它最简单的用法，直接当分数表。</div>
-    </section>
-
-    <section id="task">
-      <h2>5. 动手任务</h2>
-      <p>新建 <code>m1/trainable_bigram.py</code>。脚手架如下：普通写法直接照用，三处 <code>TODO</code> 是你要补的（每一处都在上面的五步里讲过）。</p>
-      <pre>import copy
-import torch
+  <div class="status"><span class="tag current">进行中 · 2026-09-07 改版</span><span class="tag">每段：代码 → 输出 → 解释</span></div>
+  <div class="actions"><a class="button secondary" href="index.html">课程入口</a><a class="button" href="#step-1">从第 1 步开始</a></div>
+</header>
+<nav class="jump" aria-label="学习步骤">
+<a href="#step-1">1–2 数据</a><a href="#step-3">3–4 建表与查表</a><a href="#step-5">5–6 概率与 loss</a><a href="#step-7">7 修改一次</a><a href="#step-8">8–10 完整训练</a><a href="#step-11">11 生成</a><a href="#step-12">对照旧版 class</a>
+</nav>
+<section id="step-1">
+<h2>第 1 步：先写语料和 token ID</h2>
+<p>写入：</p>
+<pre><code class="language-python">import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-sentences = ["我爱猫", "我爱狗", "你爱猫"]
-BOS, EOS = "&lt;BOS&gt;", "&lt;EOS&gt;"
-
-tokens = sorted(set("".join(sentences))) + [BOS, EOS]
+sentences = [&quot;我爱猫&quot;, &quot;我爱狗&quot;, &quot;你爱猫&quot;]
+BOS, EOS = &quot;&lt;BOS&gt;&quot;, &quot;&lt;EOS&gt;&quot;
+tokens = [&quot;你&quot;, &quot;我&quot;, &quot;爱&quot;, &quot;狗&quot;, &quot;猫&quot;, BOS, EOS]
 stoi = {token: i for i, token in enumerate(tokens)}
-itos = {i: token for token, i in stoi.items()}
+vocab_size = len(tokens)
 
+print(stoi)
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-text">{'你': 0, '我': 1, '爱': 2, '狗': 3, '猫': 4, '&lt;BOS&gt;': 5, '&lt;EOS&gt;': 6}
+</code></pre>
+<p>这一步和你之前做过的一样，只是固定了词表顺序，方便后面逐个核对数字。<code>stoi["爱"]</code> 得到 <code>2</code>，<code>tokens[4]</code> 得到“猫”。这两个编号接下来会不断出现。</p>
+<p><code>nn</code> 和 <code>F</code> 是 PyTorch 两组工具的简写。等用到某个函数时再解释它，这里不用先记。</p>
 
-def build_dataset(texts):
-    xs, ys = [], []
-    for text in texts:
-        sequence = [BOS] + list(text) + [EOS]
-        for current, target in zip(sequence, sequence[1:]):
-            xs.append(stoi[current])
-            ys.append(stoi[target])
-    return torch.tensor(xs), torch.tensor(ys)
+</section>
+<section id="step-2">
+<h2>第 2 步：把句子拆成输入和答案</h2>
+<p>接着追加：</p>
+<pre><code class="language-python">xs, ys = [], []
+for text in sentences:
+    sequence = [BOS] + list(text) + [EOS]
+    for current, target in zip(sequence, sequence[1:]):
+        xs.append(stoi[current])
+        ys.append(stoi[target])
 
+x = torch.tensor(xs, dtype=torch.long)
+y = torch.tensor(ys, dtype=torch.long)
 
-class TrainableBigram(nn.Module):
-    def __init__(self, vocab_size):
-        super().__init__()
-        # 每个 token 对所有 next token 的可训练分数
-        self.table = nn.Embedding(vocab_size, vocab_size)
+print(&quot;x:&quot;, x.tolist())
+print(&quot;y:&quot;, y.tolist())
+for input_id, target_id in zip(xs, ys):
+    print(tokens[input_id], &quot;→&quot;, tokens[target_id])
+</code></pre>
+<p>前两行输出：</p>
+<pre><code class="language-text">x: [5, 1, 2, 4, 5, 1, 2, 3, 5, 0, 2, 4]
+y: [1, 2, 4, 6, 1, 2, 3, 6, 0, 2, 4, 6]
+</code></pre>
+<p>例如 <code>x[2]=2</code>、<code>y[2]=4</code>，对应“爱 → 猫”。<code>x</code> 和 <code>y</code> 的同一个位置是一道题和它的答案。</p>
+<p><code>torch.tensor</code> 把 Python 列表变成 PyTorch 数组；<code>dtype=torch.long</code> 表示里面存整数 ID。此时还没有模型，更没有开始训练。</p>
+<p><strong>对照着看：</strong> 12 条输出中，“爱 → 猫”出现两次，“爱 → 狗”出现一次。后面训练会反复用到这些样本。</p>
 
-    def forward(self, token_ids):
-        # TODO：根据 token_ids 取出对应行并返回
-        ...
+</section>
+<section id="step-3">
+<h2>第 3 步：创建模型实际要修改的那张表</h2>
+<p>追加：</p>
+<pre><code class="language-python">table = nn.Embedding(vocab_size, vocab_size)
+with torch.no_grad():
+    table.weight.zero_()
 
+print(&quot;表的大小:&quot;, table.weight.shape)
+print(table.weight)
+</code></pre>
+<p>输出是一张 <strong>7 行、7 列、全部为 0</strong> 的表。</p>
+<p>这张表怎么读？仍然使用第 1 步的编号：</p>
+<ul>
+<li>第 2 行：当前 token 是“爱”时，对所有下一个 token 的打分。</li>
+<li>第 4 列：候选答案“猫”。</li>
+<li><code>table.weight[2, 4]</code>：当前是“爱”时，给“猫”的分数。</li>
+</ul>
+<p>这里行列编号都从 0 开始。<code>nn.Embedding(7, 7)</code> 创建可训练的查表对象，真正存数字的地方叫 <code>table.weight</code>。第一个 7 决定有多少行，第二个 7 决定每行返回多少个数。本节这两个数都等于词表大小，因为我们直接给 7 个候选答案打分。</p>
+<p>这里的 0 是<strong>尚未变成概率的分数</strong>，不是“出现 0 次”，也不是“概率为 0”。这种原始分数叫 logit；一组分数叫 logits。</p>
+<p>我们故意全部置零，让下面的数字容易核对。<code>with torch.no_grad()</code> 表示这次手动初始化不用记录求梯度的过程；它本身不禁止修改参数。这种独立查表模型可以从全零开始学习，不能据此把未来整个 Transformer 都初始化为零。</p>
 
-torch.manual_seed(42)
-x, y = build_dataset(sentences)
-model = TrainableBigram(len(tokens))
-untrained_model = copy.deepcopy(model)  # 留一份训练前快照做对照
-optimizer = torch.optim.SGD(model.parameters(), lr=1.0)
+</section>
+<section id="step-4">
+<h2>第 4 步：输入“爱”，取出对应的一行</h2>
+<p>追加：</p>
+<pre><code class="language-python">one_x = torch.tensor([stoi[&quot;爱&quot;]], dtype=torch.long)
+one_y = torch.tensor([stoi[&quot;猫&quot;]], dtype=torch.long)
+
+one_logits = table(one_x)
+print(&quot;输入:&quot;, one_x)
+print(&quot;答案:&quot;, one_y)
+print(&quot;模型给的分数:&quot;, one_logits)
+print(&quot;分数的形状:&quot;, one_logits.shape)
+</code></pre>
+<p>你会看到：输入是 <code>[2]</code>，答案是 <code>[4]</code>，分数是 <code>[[0, 0, 0, 0, 0, 0, 0]]</code>，形状是 <code>[1, 7]</code>。</p>
+<p><strong><code>table(one_x)</code> 做的具体事情就是：按输入 ID 取行。</strong> 输入 2 就取第 2 行。结果有一行，因为我们只输入了一条样本；这一行有七列，因为有七种候选答案。</p>
+<p>模型计算这行分数时没有用到 <code>one_y</code>。“猫”这个正确答案保留到第 6 步评分时才用。</p>
+<p>这就是旧版代码中 <code>model(x)</code> 此刻承担的工作。先直接操作这张表，最后再说明如何包进 class。</p>
+
+</section>
+<section id="step-5">
+<h2>第 5 步：把这一行分数转换成概率</h2>
+<p>追加：</p>
+<pre><code class="language-python">one_probs = F.softmax(one_logits, dim=-1)
+for token, probability in zip(tokens, one_probs[0].tolist()):
+    print(token, round(probability, 4))
+</code></pre>
+<p>七个 token 的输出都是 <code>0.1429</code>，约等于 <code>1/7</code>。</p>
+<p><code>F.softmax</code> 把同一行中的分数转成概率。它的计算是“每个分数先取指数，再除以这些指数的总和”。这里七个分数都是 0，指数都是 1，所以各自分到 <code>1/7</code>。</p>
+<p><code>dim=-1</code> 指最后一个维度；在 <code>[1, 7]</code> 中就是这七列。意思是让<strong>同一条样本的七个候选</strong>一起比较。<code>one_probs[0]</code> 则取出唯一那条样本的概率行。</p>
+<p>此时还没训练，“猫”和其他候选分到的概率完全相同。</p>
+
+</section>
+<section id="step-6">
+<h2>第 6 步：用正确答案“猫”计算 loss</h2>
+<p>追加：</p>
+<pre><code class="language-python">p_cat = one_probs[0, stoi[&quot;猫&quot;]]
+manual_loss = -torch.log(p_cat)
+one_loss = F.cross_entropy(one_logits, one_y)
+
+print(&quot;给猫的概率:&quot;, p_cat.item())
+print(&quot;按 M1C 算出的 loss:&quot;, manual_loss.item())
+print(&quot;cross_entropy 算出的 loss:&quot;, one_loss.item())
+</code></pre>
+<p>两个 loss 都约为 <code>1.9459</code>。</p>
+<p>现在把这三行对应起来：</p>
+<ol>
+<li><code>p_cat</code> 从七个概率里，选出正确答案“猫”的概率。</li>
+<li><code>-torch.log(p_cat)</code> 就是 M1C 的 <code>-log(真实答案概率)</code>。</li>
+<li><code>F.cross_entropy(one_logits, one_y)</code> 直接接收分数和答案 ID，用数值稳定的方式计算同一件事。</li>
+</ol>
+<p>因此，<strong>交给 <code>cross_entropy</code> 的是原始分数 <code>one_logits</code></strong>。上一节已经得到的 <code>one_probs</code> 是供我们观察和核对用的，不要把它当成 logits 再传进去。</p>
+<p><code>.item()</code> 只是把只有一个数的张量取成普通 Python 数字，便于打印。后面反向传播仍使用张量 <code>one_loss</code>。</p>
+
+</section>
+<section id="step-7">
+<h2>第 7 步：让它针对“爱 → 猫”学习一次</h2>
+<p>先追加这一小段，运行并查看梯度：</p>
+<pre><code class="language-python">optimizer = torch.optim.SGD(table.parameters(), lr=1.0)
+optimizer.zero_grad()
+one_loss.backward()
+
+print(&quot;爱这一行的梯度:&quot;)
+print(table.weight.grad[stoi[&quot;爱&quot;]])
+print(&quot;更新前爱这一行的分数:&quot;)
+print(table.weight[stoi[&quot;爱&quot;]].detach())
+</code></pre>
+<p>梯度约为：</p>
+<pre><code class="language-text">[0.1429, 0.1429, 0.1429, 0.1429, -0.8571, 0.1429, 0.1429]
+</code></pre>
+<p>第 4 列对应“猫”，它是负数；其他列是正数。此时分数表仍然全零：<strong><code>backward()</code> 计算了梯度，还没有执行参数修改。</strong></p>
+<p>接着追加：</p>
+<pre><code class="language-python">optimizer.step()
+
+print(&quot;更新后爱这一行的分数:&quot;)
+print(table.weight[stoi[&quot;爱&quot;]].detach())
 
 with torch.no_grad():
-    initial_loss = F.cross_entropy(model(x), y).item()
+    new_logits = table(one_x)
+    new_probs = F.softmax(new_logits, dim=-1)
+    print(&quot;更新后给猫的概率:&quot;, new_probs[0, stoi[&quot;猫&quot;]].item())
+    print(&quot;更新后这道题的 loss:&quot;, F.cross_entropy(new_logits, one_y).item())
+</code></pre>
+<p>更新后的分数约为：</p>
+<pre><code class="language-text">[-0.1429, -0.1429, -0.1429, -0.1429, 0.8571, -0.1429, -0.1429]
+</code></pre>
+<p>“猫”的概率从 <code>0.1429</code> 增加到约 <code>0.3118</code>，loss 从 <code>1.9459</code> 降到约 <code>1.1654</code>。</p>
+<p>为什么会这样？本节的 SGD 只做下面这个运算：</p>
+<pre><code class="language-text">新分数 = 旧分数 - 学习率 × 梯度
+猫的分数 = 0 - 1.0 × (-0.8571) = 0.8571
+狗的分数 = 0 - 1.0 × 0.1429 = -0.1429
+</code></pre>
+<p><code>table.parameters()</code> 告诉优化器要修改哪些参数，这里就是那张分数表。<code>lr=1.0</code> 决定这次修改的步幅。<code>zero_grad()</code> 清掉此前留下的梯度，因为 PyTorch 默认把新算出的梯度累加起来。<code>.detach()</code> 在这里只用于打印一份不带梯度关系的视图。</p>
+<p><strong>到这里，你已经亲眼看过一次训练：查表 → 用答案算 loss → 求梯度 → 修改表。</strong> 因为这次只学了“爱 → 猫”，所以“狗”的分数下降了；下一步要把训练集里“爱 → 狗”的样本也一起考虑进去。</p>
+
+</section>
+<section id="step-8">
+<h2>第 8 步：一次处理全部 12 条样本</h2>
+<p>单条样本演示结束。为了开始一次独立的正式实验，把表恢复为全零，并清掉演示梯度。追加：</p>
+<pre><code class="language-python">with torch.no_grad():
+    table.weight.zero_()
+optimizer.zero_grad()
+
+logits = table(x)
+loss = F.cross_entropy(logits, y)
+
+print(&quot;12 条样本的分数形状:&quot;, logits.shape)
+print(&quot;全部样本的平均 loss:&quot;, loss.item())
+print(&quot;下标 2 和 6 的样本查出的分数相同:&quot;,
+      torch.equal(logits[2], logits[6]))
+</code></pre>
+<p>输出形状是 <code>[12, 7]</code>，平均 loss 约 <code>1.9459</code>。这里没有创建 12 份模型：12 条样本都在查同一张 7×7 参数表。</p>
+<p><code>x[2]</code> 和 <code>x[6]</code> 都是“爱”，所以查出的分数相同；但 <code>y[2]</code> 是“猫”、<code>y[6]</code> 是“狗”。<code>cross_entropy</code> 会对每行选出该行正确答案的概率，再将 12 项损失取平均。</p>
+<p>这就是为什么训练后“爱”这一行要同时给猫和狗分配概率。两次猫、一次狗，都通过各自的 loss 影响同一行参数。</p>
+
+</section>
+<section id="step-9">
+<h2>第 9 步：重复训练 1000 次</h2>
+<p>追加：</p>
+<pre><code class="language-python">initial_loss = loss.item()
+initial_weights = table.weight.detach().clone()
 
 for step in range(1000):
-    logits = model(x)
+    logits = table(x)
     loss = F.cross_entropy(logits, y)
 
-    # TODO：清除上一次迭代留下的梯度
-    # TODO：根据本次 loss 计算梯度
-    # TODO：让优化器修改参数
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
-    if step % 100 == 0:
-        print(step, loss.item())
+    if step in (0, 99, 499, 999):
+        print(&quot;第&quot;, step + 1, &quot;轮，更新前 loss:&quot;, loss.item())
 
-final_loss = F.cross_entropy(model(x), y).item()
-print("initial loss:", initial_loss)
-print("final loss:", final_loss)</pre>
+with torch.no_grad():
+    final_loss = F.cross_entropy(table(x), y).item()
 
-      <h3>检查模型学到了什么</h3>
-      <pre>with torch.no_grad():
-    love_logits = model(torch.tensor([stoi["爱"]]))
-    love_probs = F.softmax(love_logits, dim=-1)[0]
-    p_cat = love_probs[stoi["猫"]].item()
-    p_dog = love_probs[stoi["狗"]].item()
+print(&quot;训练前:&quot;, initial_loss)
+print(&quot;训练后:&quot;, final_loss)
+</code></pre>
+<p>循环里的六行正是前面已经运行过的动作。每轮重新查表、重新计算 loss，是因为参数已经被上一轮修改。这里每一轮都用全体 12 条样本。</p>
+<p><code>initial_weights</code> 保存一份训练前的数字，供第 11 步做生成对照；<code>.clone()</code> 确保以后改表时不会把快照一起改掉。</p>
+<p>最终 loss 应降到约 <code>0.325</code>，接近 M1C 计数模型的 <code>0.318</code>。不用追求完全一致。即使充分训练，当前语料的最低平均 loss 也不是 0，因为“爱”后面同时有猫和狗，模型不可能对每条样本的不同答案都给概率 1。</p>
 
-print("P(猫 | 爱):", p_cat)
-print("P(狗 | 爱):", p_dog)
+</section>
+<section id="step-10">
+<h2>第 10 步：读出训练后的“爱 → 猫/狗”概率</h2>
+<p>追加：</p>
+<pre><code class="language-python">with torch.no_grad():
+    love_probs = F.softmax(table(one_x), dim=-1)[0]
 
-assert len(x) == 12
-assert model(x).shape == (12, len(tokens))
+p_cat = love_probs[stoi[&quot;猫&quot;]].item()
+p_dog = love_probs[stoi[&quot;狗&quot;]].item()
+print(&quot;P(猫 | 爱):&quot;, p_cat)
+print(&quot;P(狗 | 爱):&quot;, p_dog)
+
 assert final_loss &lt; initial_loss
 assert abs(p_cat - 2 / 3) &lt; 0.05
-assert abs(p_dog - 1 / 3) &lt; 0.05</pre>
-      <p>最后两个概率不必精确等于 <code>2/3</code> 和 <code>1/3</code>：训练是逐步逼近，而且模型会给其他 token 留下一点点概率。</p>
+assert abs(p_dog - 1 / 3) &lt; 0.05
+</code></pre>
+<p>你会得到大约 <code>0.664</code> 和 <code>0.330</code>。现在把它与第 5 步对照：初始时每个候选都是 <code>1/7</code>；1000 次更新后，概率已经接近语料中的 2:1 比例。</p>
+<p>模型仍然只接收一个 token ID。以后“我爱”和“你爱”来到最后一个“爱”时，查到的仍然都是第 2 行。这解释了它为什么仍是 Bigram。</p>
 
-      <h3>加入生成</h3>
-      <p>流程和 M1B 的生成一模一样，只是概率的来历从“查计数表再除”变成“查分数表再 softmax”：</p>
-      <pre>def generate(model, max_length=20, seed=42, temperature=1.0):
-    generator = torch.Generator().manual_seed(seed)
+</section>
+<section id="step-11">
+<h2>第 11 步：用学到的概率接龙</h2>
+<p>最后追加：</p>
+<pre><code class="language-python">@torch.no_grad()
+def generate(score_table, seed=42, max_length=20, temperature=1.0):
+    if temperature &lt;= 0:
+        raise ValueError(&quot;temperature 必须大于 0&quot;)
+    rng = torch.Generator().manual_seed(seed)
     current_id = stoi[BOS]
-    output = []
+    output_ids = []
 
     for _ in range(max_length):
-        logits = model(torch.tensor([current_id]))[0]
-        # TODO：temperature 应该怎样作用在 logits 上？
-        probs = F.softmax(..., dim=-1)
-        next_id = torch.multinomial(probs, 1, generator=generator).item()
+        current = torch.tensor([current_id], dtype=torch.long)
+        scores = score_table(current)[0].clone()
+        scores[stoi[BOS]] = -float(&quot;inf&quot;)
+        probs = F.softmax(scores / temperature, dim=-1)
+        next_id = torch.multinomial(probs, 1, generator=rng).item()
 
         if next_id == stoi[EOS]:
             break
-        output.append(itos[next_id])
+        output_ids.append(next_id)
         current_id = next_id
 
-    return "".join(output)
+    return &quot;&quot;.join(tokens[i] for i in output_ids)
 
+
+before_table = nn.Embedding(vocab_size, vocab_size)
+with torch.no_grad():
+    before_table.weight.copy_(initial_weights)
 
 for seed in range(10):
-    print(seed, generate(model, seed=seed))</pre>
-      <div class="callout"><strong>temperature（温度）是生成时的一个旋钮</strong>：把分数先除以它，再做 softmax。小于 1（比如 0.5）会拉大分数差距，输出更保守；大于 1（比如 1.5）会把概率摊平，输出更放飞；1.0 就是原样。这里的 <code>max_length</code> 限的是最多生成多少个非 EOS token，验证 <code>len(generate(..., max_length=5)) &lt;= 5</code> 即可。</div>
+    print(seed, &quot;训练前:&quot;, repr(generate(before_table, seed=seed)),
+          &quot;训练后:&quot;, repr(generate(table, seed=seed)))
 
-      <h3>对照实验</h3>
-      <p>用 <code>untrained_model</code> 和训练后的 <code>model</code> 在相同 10 个 seed 下各生成一批：</p>
-      <pre>before = [generate(untrained_model, seed=i) for i in range(10)]
-after = [generate(model, seed=i) for i in range(10)]
+assert len(generate(table, max_length=5)) &lt;= 5
+</code></pre>
+<p>按生成函数里的顺序看：</p>
+<ol>
+<li><code>current_id</code> 最初是 BOS 的 ID，也就是询问“句子以什么开头”。</li>
+<li><code>score_table(current)[0]</code> 查出这个 token 对应的一行分数。</li>
+<li>将 BOS 的候选分数设为负无穷，让它在生成时概率为 0，因为我们不把 BOS 当成正文输出。这里修改的是复制出的分数，参数表没有被修改。</li>
+<li><code>softmax</code> 得到概率，<code>multinomial</code> 按概率抽一个 ID。<code>temperature=1.0</code> 时就是直接使用分数。</li>
+<li>抽到 EOS 就结束；否则记下这个 ID，把它作为下一次输入，重复查表。</li>
+</ol>
+<p><code>@torch.no_grad()</code> 让整个生成函数不记录求梯度过程。<code>repr</code> 让空字符串显示为 <code>''</code>，便于看出模型是否一开始就抽到了 EOS。</p>
+<p>循环最多记录 <code>max_length</code> 个正文 token。本节正文 token 都是单个汉字，所以可以用字符串长度核对；以后使用子词 tokenizer，要数 token ID 的个数，不能直接拿字符长度代替。</p>
+<p>运行后，把最后的生成调用分别加上 <code>temperature=0.5</code> 和 <code>temperature=1.5</code>，各看一批。分数除以更小的正数，会扩大分数差，让高分候选更占优势；更大的温度则让概率更接近均匀。这是生成时的选择，不会重新训练模型。</p>
 
-print("训练前:", before)
-print("训练后:", after)</pre>
-      <p>预期：训练前接近乱猜；训练后多数句子呈现“我/你 → 爱 → 猫/狗 → 结束”的局部规律。再把 temperature 换成 0.5 和 1.5 各试一遍，感受旋钮的作用。</p>
-      <div class="callout blue"><strong>训练前的输出可能看起来像出 bug 了。</strong>随机初始化的表约等于 7 选 1 乱猜，每个 token 都有约 1/7 的概率，所以“训练前”那批里可能直接吐出 <code>&lt;BOS&gt;</code> 字样、或迟迟不结束——这不是你写错了，是它还没学会。对比“训练后”，这种现象应该基本消失。</div>
-      <div class="callout">别对生成质量期待过高。它仍然只记得前一个 token。这个实验验证的是<strong>训练机制有效</strong>，不是让 Bigram 突然开窍。</div>
-    </section>
+</section>
+<section id="step-12">
+<h2>回头看：旧版 class 与现在的代码有什么关系</h2>
+<p>这一段只读，不需要追加到脚本。旧版这样写：</p>
+<pre><code class="language-python">class TrainableBigram(nn.Module):
+    def __init__(self, vocab_size):
+        super().__init__()
+        self.table = nn.Embedding(vocab_size, vocab_size)
 
-    <section id="payoff">
-      <h2>6. 收官对照：梯度学到的，就是数出来的</h2>
-      <p>跑完后看三个数字，它们串起了 M1B、M1C 和本节：</p>
-      <table>
-        <thead><tr><th>数字</th><th>实测值</th><th>说明</th></tr></thead>
-        <tbody>
-          <tr><td>初始 loss</td><td>约 1.95</td><td>恰好是“7 选 1 均匀瞎猜”的分数：-log(1/7) = log 7 ≈ 1.95。随机初始化 = 什么都不知道</td></tr>
-          <tr><td>最终 loss</td><td>约 0.32</td><td>M1C 你手算过：计数模型在训练集上的 loss 是 0.318。两个数字几乎重合</td></tr>
-          <tr><td>P(猫 | 爱)</td><td>约 2/3</td><td>和 M1B 数出来的 2/3 对上了</td></tr>
-        </tbody>
-      </table>
-      <p>可训练模型从头到尾没数过一次次数。它只是被 loss 推着一步步改表，最后停在了计数表的答案旁边——<strong>同一个答案，两条路。</strong></p>
-      <div class="callout green"><strong>这是 M1 的最后一块拼图，也是整门课最重要的一条结论：</strong>loss 定了，模型学到的规律就是 loss 逼出来的。以后把这张 7×7 的表换成几亿参数的神经网络，这条结论一个字都不变。</div>
-    </section>
+    def forward(self, token_ids):
+        return self.table(token_ids)
+</code></pre>
+<p><code>__init__</code> 把第 3 步的表放进一个模型对象；<code>super().__init__()</code> 初始化 PyTorch 的模块管理功能；<code>forward</code> 描述输入怎样算成输出，这里就一行查表。</p>
+<p>调用 <code>model(x)</code> 时，PyTorch 会通过模块调用机制执行 <code>forward(x)</code>，最终执行 <code>self.table(x)</code>。<strong>本节直接写的 <code>table(x)</code>，就是原来 <code>model(x)</code> 内部的核心计算。</strong> class 是把已有计算组织起来，没多出另一套训练原理。</p>
 
-    <section>
-      <h2>7. 三个需要真正想明白的问题</h2>
-      <div class="question"><strong>题 1</strong><br>计数模型的表和可训练模型的表形状相同，里面的数字为什么不是同一种东西？</div>
-      <div class="question"><strong>题 2</strong><br>用自己的话串起“查表 → cross_entropy → backward → optimizer.step”。每一步在解决什么？</div>
-      <div class="question"><strong>题 3</strong><br>训练 loss 明显下降后，为什么模型仍然无法根据“我爱”这个完整上下文做判断？</div>
-    </section>
+</section>
+<section id="step-13">
+<h2>本节交什么</h2>
+<ul>
+<li>你的脚本，以及训练前后 loss、“猫/狗”概率和生成对照。</li>
+<li>用自己的话解释：第 7 步里，为什么 <code>backward()</code> 之后表还没变，<code>step()</code> 之后才变？</li>
+<li>解释第 8 步：相同输入“爱”遇到不同答案“猫/狗”，为什么必须共用同一行分数？这会限制模型记住多少上下文？</li>
+</ul>
+<p>这次先按代码顺序看懂，每个函数的名字都可以查。能对应出“这一行读了谁、算了什么、改了谁”，就达到了本节要训练的能力。</p>
 
-    <section id="submit">
-      <h2>8. 提交与验收</h2>
-      <ol>
-        <li><code>m1/trainable_bigram.py</code>。</li>
-        <li>初始 loss、最终 loss，以及 <code>P(猫|爱)</code>、<code>P(狗|爱)</code>。</li>
-        <li>训练前后各 10 条生成结果，并简单说出差异。</li>
-        <li>三个问题的答案。</li>
-      </ol>
-      <p>验收只看核心逻辑、输出是否合理，以及你能否解释关键步骤。忘记 API、格式问题或普通样板代码不会卡进度。</p>
-      <footer>M1D · 完成后 M1 结束，进入 M2 Tokenizer</footer>
-    </section>
-  </main>
+</section>
+<footer>M1D · 先走通一条样本，再扩展到完整训练 · 学习状态以 PROGRESS.md 为准</footer>
+</main>
 </body>
 </html>
