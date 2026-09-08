@@ -390,9 +390,9 @@ const STEPS = [
       S.hlRow = S.viewRow; S.hlCell = null; S.dimOthers = false;
       matrixTitle.textContent = "softmax 后：每行是一组概率（行和 = 1）";
       const p = softmax(S.table[S.viewRow]);
-      stepBody.innerHTML = `<p>分数不能当概率用（可以是负数、加起来不是 1）。<code>F.softmax(行, dim=-1)</code> 把这一行变成概率：<strong>每个分数取指数，再除以总和</strong>。7 个 0 的指数都是 1，于是平分：</p>
-        <div class="widget"><h4>P(下一个 | ${esc(TOKENS[S.viewRow])})</h4>${barsHTML(p)}</div>
-        <p class="hint">每个候选 ${f3(1 / 7)}——这是“7 选 1 均匀瞎猜”。训练要做的，就是把“猫”那根柱子抬高。</p>`;
+      stepBody.innerHTML = `<p>分数不能当概率用：它可以是负数，加起来也不等于 1。softmax 把一行分数变成一行概率，公式固定两步：<strong>① 每个分数取指数；② 除以这行的指数总和</strong>。现在“爱”这一行全是 0，e<sup>0</sup> = 1，七个 1 平分：</p>
+        <div class="widget"><h4>概率 P(下一个 | ${esc(TOKENS[S.viewRow])})——对当前这张分数表的每一行做 softmax</h4>${barsHTML(p)}</div>
+        <p class="hint">左表已切到概率视角：现在每格里是概率，每行加起来 = 1。每个候选 ${f3(1 / 7)}，等于均匀瞎猜。</p>`;
       stepW.innerHTML = "";
     },
   },
@@ -402,49 +402,50 @@ const STEPS = [
       S.mode = "prob"; S.table = TRAIN.snaps[0].table;
       S.hlRow = ID["爱"]; S.hlCell = [ID["爱"], ID["猫"]]; S.dimOthers = false; S.viewRow = ID["爱"];
       const p = softmax(S.table[ID["爱"]])[ID["猫"]];
-      stepBody.innerHTML = `<p>现在答案才登场：<code>one_y = [${ID["猫"]}]</code>（“猫”）。评分规则是 M1C 的公式：<strong>loss = −log(模型给正确答案的概率)</strong>。表中亮框的格子，就是这次要打分的对象。</p>
-        <div class="widget"><h4>手算过程</h4>
+      stepBody.innerHTML = `<p>现在答案才登场：<code>one_y = [${ID["猫"]}]</code>（“猫”）。评分规则是 M1C 的公式：<strong>loss = −log(模型给正确答案的概率)</strong>。左表亮框的格子 = 猫的概率，就是公式里要用到的那个数。</p>
+        <div class="widget"><h4>计算过程（每行只做一步）</h4>
           <div class="kv">
-            <span>给“猫”的概率</span><b>${f3(p)}</b>
-            <span>log(概率)</span><b>−1.946</b>
-            <span>加负号 → loss</span><b class="big-num">${f3(-Math.log(p))}</b>
+            <span>第 1 步：左表读出猫的概率</span><b>${f3(p)}</b>
+            <span>第 2 步：取对数 log(${f3(p)})</span><b>−1.946</b>
+            <span>第 3 步：加负号，得到 loss</span><b class="big-num">${f3(-Math.log(p))}</b>
           </div></div>
-        <p class="hint">−log(1/7) = log 7 ≈ 1.95，正好是“均匀瞎猜”的分数。同一行代码 <code>F.cross_entropy(logits, y)</code> 算出的也是这个数——它只是把 softmax + 取答案概率 + −log 打包了。</p>`;
+        <p class="hint">为什么是 1.95：−log(1/7) = log 7 ≈ 1.95，即“均匀瞎猜时的 loss”。<code>F.cross_entropy(logits, y)</code> 算出的也是 1.946——它把“softmax + 读概率 + −log”三步打包成了一个函数。</p>`;
       stepW.innerHTML = "";
     },
   },
   {
-    short: "7 学一次", title: "第 7 步：backward 改表，亲眼看一次",
+    short: "7 学一次", title: "第 7 步：backward 算梯度，step 改表",
     enter() {
       const d = singleStepDemo();
-      S.mode = "grad"; S.grad = d.grad; S.table = TRAIN.snaps[0].table;
-      S.hlRow = ID["爱"]; S.hlCell = null; S.dimOthers = false; S.viewRow = ID["爱"];
-      matrixTitle.textContent = "backward() 算出的梯度（只有“爱”这行非零）";
-      stepBody.innerHTML = `<p>针对这一条样本（爱 → 猫）做一次 <code>backward()</code>。梯度回答的问题是：<strong>每个格子加大一点点，loss 会升还是降？</strong>看“爱”这一行：</p>
-        <div class="widget"><h4>“爱”这一行的梯度</h4>
-          <div class="chips">${TOKENS.map((t, j) => `<span class="chip id">${esc(t)}:${f2(d.grad[ID["爱"]][j])}</span>`).join("")}</div>
-          <p class="hint">“猫”是 −0.857（加大它，loss 会降）；其余 +0.143（加大它们，loss 会升）。此刻<b>表还没变</b>——梯度只是建议。</p></div>
-        <div class="ctl-row"><button class="btn primary" id="do-step">执行 optimizer.step() 改表 →</button></div>`;
-      document.getElementById("do-step").addEventListener("click", () => {
-        S.mode = "logits"; S.table = d.table; S.hlCell = [ID["爱"], ID["猫"]];
-        matrixTitle.textContent = "step() 之后：表被真正修改了";
-        const pc = softmax(d.table[ID["爱"]])[ID["猫"]];
-        const exCat = Math.exp(d.table[ID["爱"]][ID["猫"]]);
-        const exOther = Math.exp(d.table[ID["爱"]][ID["狗"]]);
-        const total = exCat + 6 * exOther;
-        stepBody.innerHTML = `<p><code>step()</code> 按“新分数 = 旧分数 − lr × 梯度”执行修改。全表中只有“爱”这一行变了（这次只学了它）：</p>
-          <div class="widget"><h4>改完的分数，是怎么变成 P(猫)=${f3(pc)} 的？</h4>
-            <p style="margin:4px 0">① “爱”这一行现在是：<b>猫 0.857</b>，其他 6 个各 <b>−0.143</b></p>
-            <p style="margin:4px 0">② 每个分数取指数：猫 e<sup>0.857</sup> ≈ <b>${exCat.toFixed(2)}</b>，其余每个 e<sup>−0.143</sup> ≈ ${exOther.toFixed(2)}</p>
-            <p style="margin:4px 0">③ 总和 = ${exCat.toFixed(2)} + 6 × ${exOther.toFixed(2)} ≈ <b>${total.toFixed(2)}</b>，猫分到 ${exCat.toFixed(2)} / ${total.toFixed(2)} ≈ <b>${f3(pc)}</b></p>
-            ${barsHTML(softmax(d.table[ID["爱"]]), { picked: ID["猫"] })}
-            <div class="kv" style="margin-top:8px">
-              <span>P(猫|爱)</span><b>0.143 → <span style="color:var(--green)">${f3(pc)}</span></b>
-              <span>这道题的 loss</span><b>1.946 → <span style="color:var(--green)">${f3(d.loss)}</span></b>
-            </div></div>
-          <p class="hint">一次更新，概率从 1/7 抬到 ${f3(pc)}。但注意：这次只学了“爱→猫”，把“狗”压下去了——下一页把 12 条样本一起学。</p>`;
-        render();
-      });
+      S.mode = "hidden"; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
+      matrixTitle.textContent = "7 × 7 表（演示中，请看右侧的四张小表）";
+      // 构造“爱”这一行在四个时刻的数值：分数(改前/改后)、概率(改前/改后)
+      const before_scores = new Array(V).fill(0);
+      const after_scores = d.table[ID["爱"]];
+      const before_probs = softmax(before_scores);
+      const after_probs = softmax(after_scores);
+      const pc = after_probs[ID["猫"]];
+      const exCat = Math.exp(after_scores[ID["猫"]]);
+      const exOther = Math.exp(after_scores[ID["狗"]]);
+      const total = exCat + 6 * exOther;
+      const rowChips = (arr, hl, fmt) =>
+        `<div class="chips">${TOKENS.map((t, j) =>
+          `<span class="chip id"${j === hl ? ' style="border-color:var(--green);color:var(--green);font-weight:800"' : ""}>${esc(t)} ${fmt(arr[j])}</span>`).join("")}</div>`;
+      stepBody.innerHTML = `
+        <p>这一页只处理一条样本：<b>爱 → 猫</b>。左边大表先收起来，我们只盯“爱”这一行，在四个时刻的样子都摆出来，谁变谁没变一眼看清。</p>
+        <div class="compare">
+          <div class="col"><h5>① 分数（step 改之前）：全 0</h5>${rowChips(before_scores, -1, v => v.toFixed(2))}</div>
+          <div class="col"><h5>② 分数（step 改之后）</h5>${rowChips(after_scores, ID["猫"], v => v.toFixed(2))}</div>
+        </div>
+        <p style="margin:10px 0 4px"><b>1→2 之间发生了什么：</b><code>backward()</code> 先算梯度：猫 = −0.857，其余各 = +0.143（梯度含义：这个数加大，loss 会以这个速率降/升）。然后 <code>optimizer.step()</code> 执行 <b>新分数 = 旧分数 − 1.0 × 梯度</b>：猫 0 − (−0.857) = <b>+0.857</b>，其余 0 − 0.143 = <b>−0.143</b>。其他六行没有梯度，没有变化。</p>
+        <div class="compare">
+          <div class="col"><h5>③ 概率（①的 softmax）：每格 = 1/7</h5>${rowChips(before_probs, -1, v => v.toFixed(3))}</div>
+          <div class="col"><h5>④ 概率（②的 softmax）</h5>${rowChips(after_probs, ID["猫"], v => v.toFixed(3))}</div>
+        </div>
+        <p style="margin:10px 0 4px"><b>2→4 之间发生了什么（softmax 三步）：</b>每个分数取指数：猫 e<sup>0.857</sup> ≈ ${exCat.toFixed(2)}，其余每个 e<sup>−0.143</sup> ≈ ${exOther.toFixed(2)}；总和 = ${exCat.toFixed(2)} + 6 × ${exOther.toFixed(2)} ≈ ${total.toFixed(2)}；猫 = ${exCat.toFixed(2)} ÷ ${total.toFixed(2)} ≈ <b>${f3(pc)}</b>。</p>
+        ${barsHTML(after_probs, { picked: ID["猫"] })}
+        <p style="margin:8px 0 2px"><b>最后按 M1C 公式打分：</b>loss = −log(猫的概率)。①→③ 时 loss = −log(0.143) = <b>1.946</b>；②→④ 时 loss = −log(${f3(pc)}) = <b>${f3(d.loss)}</b>。loss 从 1.946 降到 ${f3(d.loss)}，说明这次修改有效。</p>
+        <p class="hint">上面四张小表就是完整过程：<b>分数被 step 改写（①→②），概率由分数 softmax 得到（③←①，④←②）</b>。此刻只有“爱”这一行学过一次，所以狗被压低——下一页 12 条样本一起学，狗会回来。</p>`;
       stepW.innerHTML = "";
     },
   },
