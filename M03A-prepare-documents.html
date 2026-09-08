@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M3A：把文档变成干净的训练集和验证集</title><link rel="stylesheet" href="assets/course.css">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml"></head>
+<body><main class="shell"><header><div class="eyebrow">MINI-LLM · 代码逐步讲解 · 2026-09-08</div>
+<h1>M3A：把文档变成干净的训练集和验证集</h1>
+<p>前置：完成 M2C。本节不需要 GPU。你将把 <strong>16 条原始记录变成 12 篇不重复的文档，再划分为 9 篇训练、3 篇验证</strong>。</p>
+<p>新建 <code>m3/prepare_documents.py</code>，将下面的 Python 段落按顺序追加；每追加一段就从头运行。完整参考代码在页面顶部。清洗器只处理本节明确的几类问题，不是通用网页清洗器。</p>
+
+<div class="status"><span class="tag">教材已准备 · 尚未验收学习</span><span class="tag">CPU 小实验</span></div>
+<div class="actions"><a class="button secondary" href="index.html">课程入口</a>
+<a class="button secondary" href="M02C-train-bilingual-tokenizer.html">上一节</a>
+<a class="button secondary" href="M03A-prepare-documents.md">Markdown 版</a>
+<a class="button secondary" href="examples/m3/prepare_documents.py" download>完整参考代码</a></div></header>
+<nav class="jump" aria-label="课程步骤"><a href="#step-1">第 1 步：拿到这批课共用的语料</a><a href="#step-2">第 2 步：清洗之前，先看改动会碰到什么</a><a href="#step-3">第 3 步：按内容去重，并保留来源</a><a href="#step-4">第 4 步：去重后再划分</a><a href="#step-5">第 5 步：存下来，让下一节沿用</a><a href="#step-6">本节只交这些</a></nav>
+<section id="step-1"><h2>第 1 步：拿到这批课共用的语料</h2>
+<p>先在 <code>mini-llm-course/</code> 目录下载<a href="assets/m3_documents.jsonl">教学语料</a>。已有这个文件就不必重新下载。</p>
+<pre><code class="language-bash">mkdir -p lessons/assets m3
+curl -fL https://ellensong77.github.io/mini-llm-course-pages/assets/m3_documents.jsonl -o lessons/assets/m3_documents.jsonl
+</code></pre>
+<p>这 16 条是导师编写的中英双语教学样本，供本课程实验使用，不含私人材料，不代表真实语料分布。<code>jsonl</code> 表示每行各是一条 JSON 记录。写入脚本：</p>
+<pre><code class="language-python">import json
+import hashlib
+import random
+from pathlib import Path
+
+source = Path(&quot;lessons/assets/m3_documents.jsonl&quot;)
+raw = [json.loads(line) for line in source.read_text(encoding=&quot;utf-8&quot;).splitlines()]
+print(&quot;原始条数:&quot;, len(raw))
+print(raw[0])
+print(raw[12])
+</code></pre>
+<p>输出中有：</p>
+<pre><code class="language-text">原始条数: 16
+{'doc_id': 'd01', 'kind': 'text', 'text': '我爱猫'}
+{'doc_id': 'd13', 'kind': 'text', 'text': '  我爱猫  '}
+</code></pre>
+<p><code>doc_id</code> 标识原始记录，<code>kind</code> 区分普通文本和代码，<code>text</code> 才是要交给 tokenizer 的内容。两个不同 ID 可能装着同一份内容。</p>
+</section><section id="step-2"><h2>第 2 步：清洗之前，先看改动会碰到什么</h2>
+<p>追加：</p>
+<pre><code class="language-python">def clean_text(record):
+    text = record[&quot;text&quot;].replace(&quot;\r\n&quot;, &quot;\n&quot;).replace(&quot;\r&quot;, &quot;\n&quot;)
+    if record[&quot;kind&quot;] == &quot;code&quot;:
+        return text.strip(&quot;\n&quot;)
+    return text.strip()
+
+for record in (raw[12], raw[14], raw[15]):
+    print(record[&quot;doc_id&quot;], repr(record[&quot;text&quot;]), &quot;→&quot;, repr(clean_text(record)))
+</code></pre>
+<p><code>d13</code> 两端空格消失；<code>d15</code> 的 Windows 换行 <code>\r\n</code> 变成 <code>\n</code>，但 <code>return</code> 前的四个空格保留；<code>d16</code> 变成空字符串。</p>
+<p><code>repr()</code> 把换行和空格显示得更清楚。普通文本去除两端空白，代码只去掉两端换行。<strong>不能不分内容把所有空格压成一个空格</strong>，否则代码缩进可能损坏。我们也没有改变英文大小写、小数点和中英文标点。</p>
+</section><section id="step-3"><h2>第 3 步：按内容去重，并保留来源</h2>
+<p>追加：</p>
+<pre><code class="language-python">unique = {}
+for record in raw:
+    text = clean_text(record)
+    if not text.strip():
+        continue
+    fingerprint = hashlib.sha256(text.encode(&quot;utf-8&quot;)).hexdigest()
+    if fingerprint not in unique:
+        unique[fingerprint] = {
+            &quot;doc_id&quot;: record[&quot;doc_id&quot;], &quot;kind&quot;: record[&quot;kind&quot;],
+            &quot;text&quot;: text, &quot;fingerprint&quot;: fingerprint, &quot;source_ids&quot;: [],
+        }
+    unique[fingerprint][&quot;source_ids&quot;].append(record[&quot;doc_id&quot;])
+
+documents = list(unique.values())
+print(&quot;去空、去重后:&quot;, len(documents))
+print(&quot;第一篇的来源:&quot;, documents[0][&quot;source_ids&quot;])
+</code></pre>
+<p>输出是 <code>12</code>，第一篇来源是 <code>['d01', 'd13']</code>。<code>d02/d14</code> 和 <code>d11/d15</code> 也分别合并了。</p>
+<p>这里的 fingerprint 是由内容计算的固定指纹。同样的清洗后文本会得到相同指纹，所以字典只保留一篇。<code>source_ids</code> 留下原始记录的来源，方便查清一篇文档是怎么来的。</p>
+<p>这只做<strong>清洗后完全相同文本的精确去重</strong>；“我喜欢猫”和“我爱猫”不会被判成重复。近似去重留到规模化数据阶段。</p>
+</section><section id="step-4"><h2>第 4 步：去重后再划分</h2>
+<p>追加：</p>
+<pre><code class="language-python">shuffled = sorted(documents, key=lambda d: d[&quot;doc_id&quot;])
+random.Random(42).shuffle(shuffled)
+train_docs = shuffled[:9]
+val_docs = shuffled[9:]
+
+train_fingerprints = {d[&quot;fingerprint&quot;] for d in train_docs}
+val_fingerprints = {d[&quot;fingerprint&quot;] for d in val_docs}
+assert train_fingerprints.isdisjoint(val_fingerprints)
+
+print(&quot;训练:&quot;, len(train_docs), &quot;验证:&quot;, len(val_docs))
+print(&quot;验证文档:&quot;, [d[&quot;doc_id&quot;] for d in val_docs])
+</code></pre>
+<p>输出数量是 <code>9/3</code>。固定排序和随机种子，是为了每次对同一份输入得到同样划分；它不让三篇验证文档突然具备统计代表性。</p>
+<p>为什么先去重？如果先按原始 ID 划分，<code>d01</code> 和 <code>d13</code> 可能一个在训练集，一个在验证集，模型就在考试时遇到了同样的内容。此处用内容指纹检查两边没有交集。</p>
+</section><section id="step-5"><h2>第 5 步：存下来，让下一节沿用</h2>
+<p>追加：</p>
+<pre><code class="language-python">out = Path(&quot;artifacts/m3&quot;)
+out.mkdir(parents=True, exist_ok=True)
+prepared = {&quot;train&quot;: train_docs, &quot;validation&quot;: val_docs}
+(out / &quot;prepared.json&quot;).write_text(
+    json.dumps(prepared, ensure_ascii=False, indent=2), encoding=&quot;utf-8&quot;
+)
+print(&quot;已保存:&quot;, out / &quot;prepared.json&quot;)
+</code></pre>
+<p>从课程根目录运行：</p>
+<pre><code class="language-bash">python m3/prepare_documents.py
+</code></pre>
+<p>会生成 <code>artifacts/m3/prepared.json</code>。下一节从这里读数据，不重新随机划分。重复执行会重写本节生成的这个文件，不修改原始语料。</p>
+</section><section id="step-6"><h2>本节只交这些</h2>
+<ul>
+<li>脚本，以及 16 → 12 → 9/3 的运行结果。</li>
+<li>用 <code>d01/d13</code> 解释为什么不同文档 ID 不足以保证训练和验证内容分开。</li>
+<li>看一眼 <code>d11</code>：清洗后 <code>return</code> 的缩进是否仍在？</li>
+</ul>
+<p>做完后进入 M3B，用 M2C 的 tokenizer v0 编码这同一批文档。完成这一课不代表已完成大规模数据清洗。</p></section><div class="actions"><a class="button" href="M03B-encode-documents.html">下一节</a></div>
+<footer>教材准备不等于学习完成 · 学习状态以 PROGRESS.md 为准</footer>
+</main></body></html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M3D：模型怎样给整个 batch 评分</title><link rel="stylesheet" href="assets/course.css">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml"></head>
+<body><main class="shell"><header><div class="eyebrow">MINI-LLM · 代码逐步讲解 · 2026-09-08</div>
+<h1>M3D：模型怎样给整个 batch 评分</h1>
+<p>前置：M3C 的 <code>make_batch()</code> 和 M3B 的 <code>encoded.json</code>。新建 <code>m3/batch_bigram.py</code>，按顺序追加，运行 <code>python m3/batch_bigram.py</code>。</p>
+<p>继续用 M1D 的查表模型，只改变输入的摆法：从 <code>[12]</code> 变成 <code>[B,T]</code>。模型输出会从 <code>[12,V]</code> 变成 <code>[B,T,V]</code>。字母依次代表文档条数、预测位置数、候选 token 数。</p>
+
+<div class="status"><span class="tag">教材已准备 · 尚未验收学习</span><span class="tag">CPU 小实验</span></div>
+<div class="actions"><a class="button secondary" href="index.html">课程入口</a>
+<a class="button secondary" href="M03C-build-batch.html">上一节</a>
+<a class="button secondary" href="M03D-batch-bigram.md">Markdown 版</a>
+<a class="button secondary" href="examples/m3/batch_bigram.py" download>完整参考代码</a></div></header>
+<nav class="jump" aria-label="课程步骤"><a href="#step-1">第 1 步：拿到训练和验证 batch</a><a href="#step-2">第 2 步：每个输入位置都查出 V 个分数</a><a href="#step-3">第 3 步：把每个位置当成一道分类题</a><a href="#step-4">第 4 步：只训练训练集</a><a href="#step-5">第 5 步：多补几个 PAD，成绩应该不变</a><a href="#step-6">第 6 步：验证集分批计算时怎样合并成绩</a><a href="#step-7">本节只交这些</a></nav>
+<section id="step-1"><h2>第 1 步：拿到训练和验证 batch</h2>
+<p>写入：</p>
+<pre><code class="language-python">import json
+import math
+from pathlib import Path
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from build_batch import make_batch
+
+payload = json.loads(Path(&quot;artifacts/m3/encoded.json&quot;).read_text(encoding=&quot;utf-8&quot;))
+V = payload[&quot;vocab_size&quot;]
+pad = payload[&quot;special_ids&quot;][&quot;pad&quot;]
+train_rows = payload[&quot;splits&quot;][&quot;train&quot;]
+val_rows = payload[&quot;splits&quot;][&quot;validation&quot;]
+x, y, valid = make_batch([r[&quot;ids&quot;] for r in train_rows], pad)
+val_x, val_y, val_valid = make_batch([r[&quot;ids&quot;] for r in val_rows], pad)
+print(&quot;训练 x/y:&quot;, x.shape, y.shape)
+print(&quot;验证 x/y:&quot;, val_x.shape, val_y.shape)
+</code></pre>
+<p>训练第一维是 9，验证第一维是 3。两组的第二维可以不同，因为它们分别按各自最长文档补齐。</p>
+<p>本课是教学 Bigram，参数量是 <code>V×V</code>。若你的 v0 词表特别大，这个表本身会占较多内存；先计算 <code>V*V*4</code> 字节的 FP32 参数大小。正式模型会在下一节把查特征和输出评分拆开，不会一直沿用这张平方大小的表。</p>
+</section><section id="step-2"><h2>第 2 步：每个输入位置都查出 V 个分数</h2>
+<p>追加：</p>
+<pre><code class="language-python">table = nn.Embedding(V, V)
+with torch.no_grad():
+    table.weight.zero_()
+logits = table(x)
+print(&quot;logits shape:&quot;, logits.shape)
+print(&quot;一条文档所有位置:&quot;, logits[0].shape)
+print(&quot;第 0 篇第 0 个位置:&quot;, logits[0, 0].shape)
+assert logits.shape == (*x.shape, V)
+</code></pre>
+<p>如果 <code>x</code> 是 <code>[9,25]</code>，结果就是 <code>[9,25,V]</code>；25 只是举例，实际值取决于 tokenizer。</p>
+<p><code>logits[0,0,:]</code> 是一组候选分数；<code>logits[0,:,3]</code> 则是同一篇文档不同位置给“候选 ID 3”的分数。这两个切片含义完全不同，不能因为都是一排数字就混用。</p>
+<p>对候选做 softmax 应沿最后一维。<code>dim=-1</code> 每次比较 V 个候选，共比较 B×T 组，输出仍为 <code>[B,T,V]</code>。</p>
+</section><section id="step-3"><h2>第 3 步：把每个位置当成一道分类题</h2>
+<p>追加：</p>
+<pre><code class="language-python">flat_logits = logits.reshape(-1, V)
+flat_y = y.reshape(-1)
+print(&quot;展平后:&quot;, flat_logits.shape, flat_y.shape)
+print(&quot;第 0 篇第 2 个位置的答案:&quot;, y[0, 2].item(), flat_y[2].item())
+
+def loss_stats(scores, targets, pad_id):
+    total = F.cross_entropy(
+        scores.reshape(-1, scores.shape[-1]), targets.reshape(-1),
+        ignore_index=pad_id, reduction=&quot;sum&quot;,
+    )
+    count = (targets != pad_id).sum()
+    if count.item() == 0:
+        raise ValueError(&quot;这一批没有有效答案&quot;)
+    return total, count
+
+total, count = loss_stats(logits, y, pad)
+loss = total / count
+initial_loss = loss.item()
+print(&quot;有效答案:&quot;, count.item(), &quot;平均 loss:&quot;, initial_loss)
+assert abs(initial_loss - math.log(V)) &lt; 1e-5
+</code></pre>
+<p><code>reshape(-1,V)</code> 保留每道题的 V 个分数，把前面 B×T 个位置排成一列题目；<code>-1</code> 让 PyTorch 自动计算题目数量。<code>y.reshape(-1)</code> 按相同顺序排列答案。</p>
+<p><code>ignore_index=pad</code> 只忽略<strong>正确答案是 PAD 的位置</strong>，不会从词表候选里删除 PAD 那一列。本例初始时每个候选分数都为零，所以真实答案概率是 <code>1/V</code>，平均 loss 为 <code>log(V)</code>。</p>
+<p><code>reduction="sum"</code> 先把每道有效题的损失加起来，再除以有效答案个数。没有把补齐位置计入分母。<code>cross_entropy</code> 接收原始 logits，不先做 softmax。</p>
+</section><section id="step-4"><h2>第 4 步：只训练训练集</h2>
+<p>追加：</p>
+<pre><code class="language-python">optimizer = torch.optim.SGD(table.parameters(), lr=1.0)
+for step in range(200):
+    scores = table(x)
+    total, count = loss_stats(scores, y, pad)
+    loss = total / count
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+with torch.no_grad():
+    train_sum, train_n = loss_stats(table(x), y, pad)
+    val_sum, val_n = loss_stats(table(val_x), val_y, pad)
+    train_mean = (train_sum / train_n).item()
+    val_mean = (val_sum / val_n).item()
+print(&quot;初始训练 loss:&quot;, initial_loss)
+print(&quot;最终训练 loss:&quot;, train_mean)
+print(&quot;验证 loss:&quot;, val_mean)
+assert train_mean &lt; initial_loss
+</code></pre>
+<p>循环仍是你已经会的训练六行。注意 <code>val_x/val_y</code> 没有出现在反向传播循环中。</p>
+<p>训练 loss 应下降，但数值取决于你的 v0，不要求收敛到 M1D 的 0.318。这里真实文档更多、词表不同，不能比较成同一个考试成绩。也不把“验证 loss 必须高于训练 loss”写成普遍断言。</p>
+</section><section id="step-5"><h2>第 5 步：多补几个 PAD，成绩应该不变</h2>
+<p>追加：</p>
+<pre><code class="language-python">with torch.no_grad():
+    more_x = F.pad(x, (0, 3), value=pad)
+    more_y = F.pad(y, (0, 3), value=pad)
+    extra_sum, extra_n = loss_stats(table(more_x), more_y, pad)
+    extra_mean = extra_sum / extra_n
+    torch.testing.assert_close(extra_mean, train_sum / train_n)
+    assert extra_n.item() == train_n.item()
+print(&quot;多补三个 PAD 后 loss:&quot;, extra_mean.item())
+</code></pre>
+<p><code>(0,3)</code> 表示最后一维左边不补，右边补三格。相同文档只是矩形变宽了，真实题目没变，因此 loss 应在浮点容差内相同。这个实验可以抓住错误的分母或忘记忽略 PAD 的问题。</p>
+</section><section id="step-6"><h2>第 6 步：验证集分批计算时怎样合并成绩</h2>
+<p>追加：</p>
+<pre><code class="language-python">sum_of_losses, number_of_targets = 0.0, 0
+with torch.no_grad():
+    for group in (val_rows[:1], val_rows[1:]):
+        group_x, group_y, _ = make_batch([r[&quot;ids&quot;] for r in group], pad)
+        group_sum, group_n = loss_stats(table(group_x), group_y, pad)
+        sum_of_losses += group_sum.item()
+        number_of_targets += group_n.item()
+split_val_mean = sum_of_losses / number_of_targets
+assert math.isclose(split_val_mean, val_mean, rel_tol=1e-5, abs_tol=1e-6)
+print(&quot;分两批算验证 loss:&quot;, split_val_mean)
+</code></pre>
+<p>不是把两个 batch 的平均 loss 再简单平均。若一批有 10 道有效题，另一批有 100 道题，简单平均会让第一批每道题得到十倍权重。这里总损失相加、总题数相加，结果应与整批验证一致。</p>
+</section><section id="step-7"><h2>本节只交这些</h2>
+<ul>
+<li>训练/验证 <code>x/y/logits</code> 的 shape，初始与最终 loss。</li>
+<li>两项检查通过：多补 PAD 不改成绩，验证拆批不改成绩。</li>
+<li>用一个 <code>b,t</code> 坐标说明 logits 的一组分数如何与 y 的一个答案对应。</li>
+</ul>
+<p>到这里你已经有小数据训练入口。M3 的规模化部分以后回访；下一课先把模型从直接查分数，改成“查一小组特征，再算分数”。</p></section><div class="actions"><a class="button" href="M04A-embedding-and-linear.html">下一节</a></div>
+<footer>教材准备不等于学习完成 · 学习状态以 PROGRESS.md 为准</footer>
+</main></body></html>

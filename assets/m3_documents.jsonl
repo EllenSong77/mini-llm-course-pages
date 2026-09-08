@@ -1,0 +1,16 @@
+{"doc_id":"d01","kind":"text","text":"我爱猫"}
+{"doc_id":"d02","kind":"text","text":"我爱狗"}
+{"doc_id":"d03","kind":"text","text":"你爱猫"}
+{"doc_id":"d04","kind":"text","text":"I like cats."}
+{"doc_id":"d05","kind":"text","text":"I like dogs."}
+{"doc_id":"d06","kind":"text","text":"You like cats."}
+{"doc_id":"d07","kind":"text","text":"机器学习需要数据。"}
+{"doc_id":"d08","kind":"text","text":"模型根据上下文预测下一个词。"}
+{"doc_id":"d09","kind":"text","text":"A model learns from data."}
+{"doc_id":"d10","kind":"text","text":"用 PyTorch 训练一个小模型。"}
+{"doc_id":"d11","kind":"code","text":"def add(a, b):\n    return a + b"}
+{"doc_id":"d12","kind":"code","text":"price = 12.50\nprint(price)"}
+{"doc_id":"d13","kind":"text","text":"  我爱猫  "}
+{"doc_id":"d14","kind":"text","text":"我爱狗\r\n"}
+{"doc_id":"d15","kind":"code","text":"def add(a, b):\r\n    return a + b"}
+{"doc_id":"d16","kind":"text","text":"   \n"}

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M3C：把不同长度的文档摆成一个 batch</title><link rel="stylesheet" href="assets/course.css">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml"></head>
+<body><main class="shell"><header><div class="eyebrow">MINI-LLM · 代码逐步讲解 · 2026-09-08</div>
+<h1>M3C：把不同长度的文档摆成一个 batch</h1>
+<p>前置：M3B 的 <code>encoded.json</code>。新建 <code>m3/build_batch.py</code>，按顺序追加。先用熟悉的字符 ID 手动核对，再换成自己的 tokenizer 数据。</p>
+<p>这一节只处理两个轴：<code>B</code> 是同时放进来的文档条数；<code>T</code> 是每行安排的预测位置数。<code>[2,4]</code> 就是两篇文档，每篇安排四个位置。</p>
+
+<div class="status"><span class="tag">教材已准备 · 尚未验收学习</span><span class="tag">CPU 小实验</span></div>
+<div class="actions"><a class="button secondary" href="index.html">课程入口</a>
+<a class="button secondary" href="M03B-encode-documents.html">上一节</a>
+<a class="button secondary" href="M03C-build-batch.md">Markdown 版</a>
+<a class="button secondary" href="examples/m3/build_batch.py" download>完整参考代码</a></div></header>
+<nav class="jump" aria-label="课程步骤"><a href="#step-1">第 1 步：先摆两条长度不同的序列</a><a href="#step-2">第 2 步：写一个补齐并错开答案的函数</a><a href="#step-3">第 3 步：把 ID 还原成一道道题</a><a href="#step-4">第 4 步：接入 M3B 的真实编码</a><a href="#step-5">第 5 步：确认哪里已经做过了右移</a><a href="#step-6">本节只交这些</a></nav>
+<section id="step-1"><h2>第 1 步：先摆两条长度不同的序列</h2>
+<p>写入：</p>
+<pre><code class="language-python">import json
+from pathlib import Path
+import torch
+
+if __name__ == &quot;__main__&quot;:
+    toy_tokens = [&quot;你&quot;, &quot;我&quot;, &quot;爱&quot;, &quot;狗&quot;, &quot;猫&quot;, &quot;&lt;BOS&gt;&quot;, &quot;&lt;EOS&gt;&quot;, &quot;&lt;PAD&gt;&quot;]
+    toy_sequences = [[5, 1, 2, 4, 6], [5, 1, 6]]
+    print(toy_sequences)
+</code></pre>
+<p>第一条是 <code>BOS 我 爱 猫 EOS</code>；第二条是 <code>BOS 我 EOS</code>。第二条故意短一点，方便看出补齐行为。这个小词表在 M1D 的七个 token 后加了 PAD，编号为 7。</p>
+<p><code>if __name__ == "__main__":</code> 表示这段演示只在直接运行本文件时执行。下一节会导入本文件的函数，不希望那时把演示又跑一遍。这里的缩进需要保留。</p>
+</section><section id="step-2"><h2>第 2 步：写一个补齐并错开答案的函数</h2>
+<p>在文件末尾追加，函数定义从最左边开始：</p>
+<pre><code class="language-python">def make_batch(sequences, pad_id):
+    if not sequences or any(len(s) &lt; 2 for s in sequences):
+        raise ValueError(&quot;至少有一条序列，每条至少包含 BOS 和 EOS&quot;)
+    max_length = max(len(s) for s in sequences)
+    padded = [s + [pad_id] * (max_length - len(s)) for s in sequences]
+    full = torch.tensor(padded, dtype=torch.long)
+    x = full[:, :-1]
+    y = full[:, 1:]
+    valid = y != pad_id
+    return x, y, valid
+
+
+if __name__ == &quot;__main__&quot;:
+    x, y, valid = make_batch(toy_sequences, pad_id=7)
+    print(&quot;x:&quot;, x.tolist())
+    print(&quot;y:&quot;, y.tolist())
+    print(&quot;valid:&quot;, valid.tolist())
+    print(&quot;shape:&quot;, x.shape, y.shape)
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-text">x: [[5, 1, 2, 4], [5, 1, 6, 7]]
+y: [[1, 2, 4, 6], [1, 6, 7, 7]]
+valid: [[True, True, True, True], [True, True, False, False]]
+shape: torch.Size([2, 4]) torch.Size([2, 4])
+</code></pre>
+<p>按函数顺序看：先将两条完整序列补成长度 5；<code>full[:, :-1]</code> 取所有行、去掉最后一列作为输入；<code>full[:, 1:]</code> 取所有行、去掉第一列作为答案。完整序列长度 5，因此有 4 个预测位置。</p>
+<p>冒号 <code>:</code> 表示这一维全部保留。<code>valid</code> 也是 <code>[2,4]</code>，每个位置说明<strong>这道题是否应该算进 loss</strong>。这是答案有效性标记，不是 Attention 的可见性规则。</p>
+</section><section id="step-3"><h2>第 3 步：把 ID 还原成一道道题</h2>
+<p>追加：</p>
+<pre><code class="language-python">if __name__ == &quot;__main__&quot;:
+    for b in range(x.shape[0]):
+        for t in range(x.shape[1]):
+            current = toy_tokens[x[b, t].item()]
+            target = toy_tokens[y[b, t].item()]
+            print(&quot;文档&quot;, b, &quot;位置&quot;, t, current, &quot;→&quot;, target,
+                  &quot;计分&quot; if valid[b, t] else &quot;忽略&quot;)
+    assert valid.sum().item() == 6
+    assert y[0, 3].item() == 6 and valid[0, 3].item()
+</code></pre>
+<p>第 0 行有四道题：BOS→我、我→爱、爱→猫、猫→EOS。第 1 行只有两道真实题：BOS→我、我→EOS；余下两道答案是 PAD，不计分。</p>
+<p><strong>EOS 要计分，PAD 不计分。</strong> 结束是模型要学会的行为；补齐只是为了把数据摆成矩形。</p>
+<p>第二条短文档的 <code>x</code> 里出现 EOS 和 PAD 是正常的，因为这些位置对应的答案都是 PAD，loss 不要求模型学习“结束后要预测占位符”。</p>
+</section><section id="step-4"><h2>第 4 步：接入 M3B 的真实编码</h2>
+<p>追加：</p>
+<pre><code class="language-python">if __name__ == &quot;__main__&quot;:
+    payload = json.loads(Path(&quot;artifacts/m3/encoded.json&quot;).read_text(encoding=&quot;utf-8&quot;))
+    real_pad = payload[&quot;special_ids&quot;][&quot;pad&quot;]
+    rows = payload[&quot;splits&quot;][&quot;train&quot;][:2]
+    real_x, real_y, real_valid = make_batch([r[&quot;ids&quot;] for r in rows], real_pad)
+    print(&quot;文档:&quot;, [r[&quot;doc_id&quot;] for r in rows])
+    print(&quot;实际 batch shape:&quot;, real_x.shape)
+    print(&quot;有效答案数:&quot;, real_valid.sum().item())
+    expected = sum(len(r[&quot;ids&quot;]) - 1 for r in rows)
+    assert real_valid.sum().item() == expected
+    for b, row in enumerate(rows):
+        length = len(row[&quot;ids&quot;]) - 1
+        assert real_x[b, :length].tolist() == row[&quot;ids&quot;][:-1]
+        assert real_y[b, :length].tolist() == row[&quot;ids&quot;][1:]
+</code></pre>
+<p>运行 <code>python m3/build_batch.py</code>。实际 shape 的第一维仍为 2，第二维取决于这两篇文档的编码长度。两个断言逐个核对输入和答案是否对应原序列，能抓住“长度对了、顺序却错了”的问题。</p>
+<p>小实验保留整篇短文档，不截断也不拼接文档。正式长文档会切窗口，届时不能把“达到窗口末尾”当成“文档真的结束”而伪造 EOS。</p>
+</section><section id="step-5"><h2>第 5 步：确认哪里已经做过了右移</h2>
+<p>你已经在函数里执行过：</p>
+<pre><code class="language-text">x = full[:, :-1]
+y = full[:, 1:]
+</code></pre>
+<p>下一节模型看到 <code>x[b,t]</code> 后，应该预测 <strong>同一坐标的 <code>y[b,t]</code></strong>。不要再写 <code>y[:,1:]</code>，否则会变成预测下下个 token。</p>
+</section><section id="step-6"><h2>本节只交这些</h2>
+<ul>
+<li><code>build_batch.py</code> 与两组演示输出。</li>
+<li>指着短文档那一行说清：哪些位置参与 loss，为什么 EOS 要计分而 PAD 不计分。</li>
+<li>能用 <code>x[0,2]</code> 和 <code>y[0,2]</code> 说出一组输入/答案即可，不要求背 slicing API。</li>
+</ul>
+<p>下一节复用 <code>make_batch</code>，让 Bigram 一次给所有位置打分。</p></section><div class="actions"><a class="button" href="M03D-batch-bigram.html">下一节</a></div>
+<footer>教材准备不等于学习完成 · 学习状态以 PROGRESS.md 为准</footer>
+</main></body></html>

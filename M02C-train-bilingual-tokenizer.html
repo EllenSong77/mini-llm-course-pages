@@ -16,7 +16,7 @@
       <div class="eyebrow">MINI-LLM · M2C</div>
       <h1>训练一个真的能保存、加载和测试的 tokenizer</h1>
       <p class="lede">上一节手写 BPE 是为了看懂核心循环。这一节改用 SentencePiece 处理真实细节，训练两个中英双语 tokenizer，并用固定测试集选择更合适的方案。</p>
-      <div class="status"><span class="tag">状态：教材已准备</span><span class="tag">实现方式：vibe coding + 审查</span><span class="tag">产出：Tokenizer v0</span></div>
+      <div class="status"><span class="tag current">状态：进行中</span><span class="tag">实现方式：vibe coding + 审查</span><span class="tag">产出：Tokenizer v0</span></div>
       <div class="actions"><a class="button secondary" href="index.html">返回课程入口</a><a class="button secondary" href="M02B-hand-bpe.html">上一节</a></div>
     </header>
 
@@ -52,7 +52,7 @@
       <h2>3. 用 SentencePiece 训练两个候选</h2>
       <p>在服务器课程环境中安装：</p>
       <pre>python -m pip install sentencepiece</pre>
-      <p>新建 <code>m2/train_sentencepiece.py</code>：</p>
+      <p>新建 <code>m2/train_sentencepiece.py</code>。以下相对路径都从 <code>mini-llm-course/</code> 目录运行：</p>
       <pre>from pathlib import Path
 import sentencepiece as spm
 
@@ -95,10 +95,11 @@ for size in (256, 512):
           <tr><td><code>vocab_size</code></td><td>希望词表达到的容量；小语料可能凑不满，所以演示时关闭硬性限制。</td></tr>
           <tr><td><code>character_coverage</code></td><td>希望直接覆盖训练语料中多大比例的字符；极少见字符可能落入 UNK。</td></tr>
           <tr><td><code>unk/bos/eos/pad_id</code></td><td>显式固定特殊 token 的 ID，避免后续模型和数据管线各自猜测。</td></tr>
-          <tr><td><code>shuffle_input_sentence=False</code></td><td>演示阶段保持训练输入顺序稳定，便于复现实验。</td></tr>
+          <tr><td><code>shuffle_input_sentence=False</code></td><td>关闭句子抽样时的随机打乱。本例未限制 input_sentence_size，会读取全量输入；仅此选项不保证跨库版本、跨平台训练结果完全相同。</td></tr>
         </tbody>
       </table>
       <div class="callout blue"><code>hard_vocab_limit=False</code> 只是照顾小型演示语料。务必打印 <code>sp.get_piece_size()</code>，确认两个候选实际生成了多少 token；不要只相信文件名里的 256/512。</div>
+      <div class="callout"><strong>2026-09-08 参数补充：</strong>256/512 只适用于基础字符较少的小语料。若报 <code>Vocabulary size is smaller than required_chars</code>，说明连基础字符与特殊 token 都放不下。按报错给出的最低数量调大两个候选，并留出合并空间；例如最低数量为 1300 时，可比较 2048/4096。同步修改训练、评测路径和对比表中的容量。<code>hard_vocab_limit=False</code> 允许词表实际大小小于请求值，不能让过小词表容纳更多必需字符。无需为了凑 256 而删除正常中文字符。这个检查可见 <a href="https://github.com/google/sentencepiece/blob/master/src/trainer_interface.cc">SentencePiece 训练器源码</a>。</div>
     </section>
 
     <section id="inspect">
@@ -142,6 +143,9 @@ def inspect(model_file):
 
     print("\ntokens per character:", total_tokens / total_chars)
     print("UNK count:", total_unk)</pre>
+      <p>把 <code>TEST_SAMPLES</code> 和 <code>inspect()</code> 放在同一个评测脚本中，然后在函数定义下方追加调用，否则运行脚本只定义函数，不会打印评测结果：</p>
+      <pre>for size in (256, 512):
+    inspect(f"artifacts/tokenizers/bilingual_bpe_{size}.model")</pre>
       <p><code>tokens per character</code> 是这组测试上“每个字符平均被切成多少 token”。在同一测试集上越低，通常表示序列越短；但它不是唯一质量指标。</p>
 
       <h3>人工审查四件事</h3>
@@ -191,7 +195,7 @@ artifacts/tokenizers/bilingual_v0.vocab</pre>
         <li>完整对比表、7 条测试的切分输出和 v0 选择理由。</li>
         <li>故障实验与三个问题的答案。</li>
       </ol>
-      <p>完成后，M2 正式结束。下一阶段进入 M3：把真实原始文档变成干净、可复现、可供八卡训练读取的 token 数据分片。</p>
+      <p>完成后，M2 正式结束。下一批先进入 M3 的小数据实验：文档清洗与划分 → token 序列 → batch 和标签 → 用 Bigram 验证 loss；再接 M4A 的 embedding 与线性映射。大规模数据分片和八卡数据读取会在小 Transformer 单卡跑通后完善。</p>
       <h3>官方参考</h3>
       <ul>
         <li><a href="https://github.com/google/sentencepiece">SentencePiece 官方仓库与设计说明</a></li>
@@ -199,6 +203,7 @@ artifacts/tokenizers/bilingual_v0.vocab</pre>
         <li><a href="https://github.com/google/sentencepiece/blob/master/doc/options.md">SentencePiece 训练参数说明</a></li>
       </ul>
     </section>
+    <div class="actions"><a class="button" href="M03A-prepare-documents.html">完成本节后：进入 M3A</a></div>
     <footer>M2C · 完成后进入 M3 预训练数据工程</footer>
   </main>
 </body>

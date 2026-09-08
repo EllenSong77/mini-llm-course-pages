@@ -15,33 +15,48 @@
     <header>
       <div class="eyebrow">MINI-LLM · LEARNING PATH</div>
       <h1>从“会数次数”走到“能训练 tokenizer”</h1>
-      <p class="lede">下面四节已经一次性准备好。请按顺序完成：M1D 会结束语言模型最小闭环；M2A–M2C 会解释并实践模型如何读取中英文文本。</p>
-      <div class="status"><span class="tag current">现在做：M1D</span><span class="tag">教材已准备：4 节</span><span class="tag">不要提前标记完成</span></div>
-      <div class="actions"><a class="button" href="M01D-trainable-bigram.html">开始 M1D</a><a class="button secondary" href="#roadmap">查看 300M 路线</a></div>
+      <p class="lede">M1D、M2A、M2B 主线已完成。当前继续 M2C；接下来的 M3A–M3D、M4A 五节课、教学语料和参考代码已准备好。完成 M2C 后按顺序学习。</p>
+      <div class="status"><span class="tag current">现在做：M2C</span><span class="tag">更新：2026-09-08</span><span class="tag">下一批：文档到模型输入</span></div>
+      <div class="actions"><a class="button" href="M02C-train-bilingual-tokenizer.html">继续 M2C</a><a class="button secondary" href="#next-batch">下一批安排</a><a class="button secondary" href="#roadmap">查看 300M 路线</a></div>
     </header>
 
     <section>
       <h2>这一批的学习顺序</h2>
       <div class="lesson-list">
-        <a class="lesson" href="M01D-trainable-bigram.html"><small>第 1 节 · 当前任务</small><strong>M1D：把计数表变成可训练模型</strong><span>打通 logits → softmax → loss → gradient → update → generation。配套<a href="M01D-interactive.html">交互演示</a>：亲眼看 7×7 分数表被梯度一步步改写。</span></a>
-        <a class="lesson" href="M02A-tokenizer-map.html"><small>第 2 节</small><strong>M2A：Tokenizer 到底在决定什么</strong><span>比较字符、词、字节、子词四种切分方法，理解词表大小为什么是设计选择。</span></a>
-        <a class="lesson" href="M02B-hand-bpe.html"><small>第 3 节</small><strong>M2B：手工执行 BPE</strong><span>亲眼看见高频相邻片段如何逐轮合并成新 token。</span></a>
-        <a class="lesson" href="M02C-train-bilingual-tokenizer.html"><small>第 4 节</small><strong>M2C：训练一个工程版中英双语 tokenizer</strong><span>使用 SentencePiece 训练、测试、比较并保存真正可供后续模型使用的 tokenizer。</span></a>
+        <a class="lesson" href="M01D-trainable-bigram.html"><small>第 1 节 · 主线已完成</small><strong>M1D：把计数表变成可训练模型</strong><span>打通 logits → softmax → loss → gradient → update → generation。</span></a>
+        <a href="M01D-interactive.html">M1D 配套交互演示：看 7×7 分数表被梯度改写</a>
+        <a class="lesson" href="M02A-tokenizer-map.html"><small>第 2 节 · 主线已完成</small><strong>M2A：Tokenizer 到底在决定什么</strong><span>比较字符、词、字节、子词四种切分方法，理解词表大小为什么是设计选择。</span></a>
+        <a class="lesson" href="M02B-hand-bpe.html"><small>第 3 节 · 主线已完成</small><strong>M2B：手工执行 BPE</strong><span>亲眼看见高频相邻片段如何逐轮合并成新 token。</span></a>
+        <a class="lesson" href="M02C-train-bilingual-tokenizer.html"><small>第 4 节 · 当前任务</small><strong>M2C：训练一个工程版中英双语 tokenizer</strong><span>使用 SentencePiece 训练、测试、比较并保存真正可供后续模型使用的 tokenizer。</span></a>
       </div>
-      <div class="callout green"><strong>做完以后：</strong>M1 全部完成，M2 Tokenizer 全部完成。下一节进入 M3“预训练数据工程”，开始处理真实文档、清洗、去重、切分和数据分片。</div>
+      <div class="callout green"><strong>完成 M2C 后：</strong>M2 Tokenizer 结束。接下来先用可检查的小数据把文档变成训练 batch；规模化数据工程在小模型单卡跑通后完善。</div>
+    </section>
+
+    <section id="next-batch">
+      <h2>下一批五节：课件已准备，等待你完成 M2C</h2>
+      <ol>
+        <li><a href="M03A-prepare-documents.html"><strong>M3A：</strong>清洗与去重，再划分训练/验证文档。</a></li>
+        <li><a href="M03B-encode-documents.html"><strong>M3B：</strong>把文档编码成 token，检查 BOS/EOS 与解码结果。</a></li>
+        <li><a href="M03C-build-batch.html"><strong>M3C：</strong>把不同长度文档组成 batch，逐个位置核对输入和下一 token 答案。</a></li>
+        <li><a href="M03D-batch-bigram.html"><strong>M3D：</strong>复用 Bigram 检查 batch 的 loss，理解哪些位置参与评分。</a></li>
+        <li><a href="M04A-embedding-and-linear.html"><strong>M4A：</strong>从 ID 查到 embedding，再用线性映射生成候选分数。</a></li>
+      </ol>
+      <p>每一步都有代码、实际输出和就地解释。做完后进入单句单头 Attention，再逐步增加因果 mask、batch 和多头。</p>
+      <div class="actions"><a class="button" href="M03A-prepare-documents.html">预览 M3A</a><a class="button secondary" href="assets/m3-m4-learning-pack.zip" download>下载五节学习包</a><a class="button secondary" href="assets/m3_documents.jsonl" download>只下载教学语料</a></div>
+      <p>学习包包含 Markdown 手册和独立的 reference 目录，不含你的 tokenizer。参考脚本已在导师临时 CPU 环境验证；你自己的 token ID、长度与 loss 会随 v0 改变。</p>
     </section>
 
     <section id="roadmap">
       <h2>手搓 300M：总共 7 个阶段</h2>
-      <p>这里按能力里程碑划分，不按周数划分。包含已经完成的环境阶段，一共 7 个阶段；你现在处于第 1 阶段尾部。</p>
+      <p>这里按能力里程碑划分，不按周数划分。一共 7 个阶段；阶段 0–1 已完成，你现在处于阶段 2。数据工程会在模型跑通后回访完善。</p>
       <div class="stage" data-n="0"><h3>服务器与实验环境</h3><p>M0 · 已完成。知道手里的 8×A100 能做什么，验证 CUDA、NCCL、BF16 和数据盘。</p></div>
-      <div class="stage current" data-n="1"><h3>语言模型最小闭环</h3><p>M1 · 当前阶段。理解 next-token prediction，并让最小模型真正通过梯度下降学习。</p></div>
-      <div class="stage" data-n="2"><h3>Tokenizer 与预训练数据</h3><p>M2–M3。把原始中英文文档可靠地转换为可训练 token 流。</p></div>
+      <div class="stage" data-n="1"><h3>语言模型最小闭环</h3><p>M1 · 主线已完成。理解 next-token prediction，并让最小模型通过梯度下降学习。</p></div>
+      <div class="stage current" data-n="2"><h3>Tokenizer 与可训练的小数据</h3><p>M2–M3 基础部分。把文档转换为可检查的 batch；规模化部分在 M6 后回访。</p></div>
       <div class="stage" data-n="3"><h3>Transformer 核心</h3><p>M4–M5。亲手实现 Attention 和完整 Llama-like Decoder，并算清参数量。</p></div>
       <div class="stage" data-n="4"><h3>单卡训练与性能</h3><p>M6–M7。训练小模型，理解优化器、精度、显存、吞吐和 checkpoint。</p></div>
-      <div class="stage" data-n="5"><h3>八卡分布式扩展</h3><p>M8–M9。从 DDP 到 FSDP/ZeRO，知道数据和梯度如何在 8 张 GPU 间流动。</p></div>
+      <div class="stage" data-n="5"><h3>八卡分布式扩展</h3><p>M8 的 DDP 为主线。M9 的 FSDP/ZeRO 工程根据实测瓶颈选修；理解数据和梯度如何在 8 张 GPU 间流动。</p></div>
       <div class="stage" data-n="6"><h3>300M Base Model 预训练</h3><p>M10 + Base 模型评测。冻结架构、数据和预算，完成正式预训练、恢复测试与基础能力评价。</p></div>
-      <div class="callout blue">从现在算还剩 6 个阶段。第 6 阶段结束时，你就拥有自己从数据、tokenizer、架构到八卡训练全程构建的 300M Base Model。</div>
+      <div class="callout blue">从现在算还剩 5 个阶段。第 6 阶段结束时，你就拥有自己从数据、tokenizer、架构到八卡训练全程构建的约 300M Base Model。</div>
       <h3>300M 之后还有什么</h3>
       <p>SFT、DPO、完整评测、KV Cache 和服务化属于后训练与交付扩展（M11–M15）。它们很重要，但不计入“先把 300M Base Model 手搓出来”的 7 个阶段。</p>
     </section>
