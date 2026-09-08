@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M1D · 交互演示：亲眼看 Bigram 被训练</title>
+  <link rel="stylesheet" href="assets/course.css">
+  <style>
+    .viz-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 860px) { .viz-grid { grid-template-columns: 1fr; } }
+    .panel { margin-top: 0; }
+    .stepper { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+    .stepper button { border: 1px solid var(--line); background: var(--soft); color: var(--muted); border-radius: 999px; padding: 5px 10px; font-size: 13px; cursor: pointer; }
+    .stepper button.on { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+    .navrow { display: flex; gap: 10px; align-items: center; margin: 6px 0 0; }
+    .navrow .arrow-btn { border: 1px solid var(--line); background: var(--paper); color: var(--text); border-radius: 10px; padding: 8px 14px; cursor: pointer; font: inherit; }
+    .navrow .arrow-btn:disabled { opacity: .4; cursor: default; }
+    table.matrix { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.matrix th, table.matrix td { border: 1px solid var(--line); text-align: center; font-size: 12px; padding: 0; height: 34px; line-height: 1.15; overflow: hidden; }
+    table.matrix th { background: var(--soft); color: var(--muted); font-weight: 650; font-size: 11.5px; }
+    table.matrix th.corner { width: 44px; }
+    table.matrix th.rowlab { cursor: pointer; }
+    table.matrix th.rowlab:hover { color: var(--green); }
+    td.dim { opacity: .18; }
+    tr.dim-row td, tr.dim-row th { opacity: .18; }
+    tr.hl-row th { background: var(--green-soft); color: var(--green); font-weight: 800; }
+    td.hl-cell { outline: 3px solid var(--green); outline-offset: -3px; font-weight: 800; }
+    .cell-name { display: block; font-size: 10px; opacity: .75; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
+    .widget { background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 12px; }
+    .widget h4 { margin: 0 0 8px; font-size: 14px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 3px 8px; font-size: 13px; }
+    .chip.id { font-family: ui-monospace, Menlo, monospace; }
+    .chip.samp b { color: var(--green); }
+    .bars { display: grid; gap: 6px; }
+    .bar-row { display: grid; grid-template-columns: 46px 1fr 62px; gap: 8px; align-items: center; font-size: 12.5px; }
+    .bar-row .lab { font-family: ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar-row .track { height: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+    .bar-row .fill { height: 100%; background: var(--green); transition: width .3s ease; }
+    .bar-row.picked .lab { color: var(--green); font-weight: 800; }
+    .bar-row.picked .track { outline: 2px solid var(--green); outline-offset: 1px; }
+    .bar-row.masked { opacity: .4; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; margin: 6px 0; }
+    .kv b { font-family: ui-monospace, Menlo, monospace; }
+    .big-num { font-size: 26px; font-weight: 800; color: var(--green); }
+    .btn { border: 1px solid var(--line); background: var(--paper); color: var(--text); border-radius: 10px; padding: 8px 13px; cursor: pointer; font: inherit; font-size: 14px; }
+    .btn.primary { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+    .btn:disabled { opacity: .45; cursor: default; }
+    .ctl-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+    input[type="range"] { accent-color: var(--green); }
+    .loss-svg { width: 100%; height: auto; display: block; margin-top: 8px; }
+    .curve-note { font-size: 12px; color: var(--muted); }
+    .seq-out { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; min-height: 34px; }
+    .seq-out .tok { border: 1px solid var(--green); color: var(--green); border-radius: 8px; padding: 3px 9px; font-size: 15px; font-weight: 700; }
+    .seq-out .eos { border-style: dashed; color: var(--muted); }
+    .hint { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+    @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+    .compare .col { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .compare h5 { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+    .flowline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-family: ui-monospace, Menlo, monospace; font-size: 13px; margin: 8px 0; }
+    .flowline span { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px; }
+  </style>
+</head>
+<body>
+<main class="shell">
+<header>
+  <div class="eyebrow">MINI-LLM · M1D · 交互演示</div>
+  <h1>亲眼看 Bigram 被训练</h1>
+  <p class="lede">对应教材第 1–11 步。下面按步推进：7×7 分数表会变色、变形、被梯度一步步改写。训练动画是在你的浏览器里<strong>真实运行梯度下降</strong>算出来的，数字和教材完全一致。</p>
+  <div class="status"><span class="tag">训练在本地实时计算</span><span class="tag">可反复回看每一步</span><span class="tag current">建议配合教材使用</span></div>
+  <div class="actions"><a class="button secondary" href="M01D-trainable-bigram.html">打开文字教材</a><a class="button secondary" href="index.html">课程入口</a></div>
+</header>
+
+<section class="panel">
+  <div class="stepper" id="stepper"></div>
+  <div class="navrow">
+    <button class="arrow-btn" id="btn-prev">← 上一步</button>
+    <button class="arrow-btn" id="btn-next">下一步 →</button>
+    <span class="hint" id="nav-hint"></span>
+  </div>
+</section>
+
+<div class="viz-grid">
+  <section class="panel" id="matrix-panel">
+    <h2 id="matrix-title">7 × 7 分数表</h2>
+    <div id="matrix-wrap"></div>
+    <div class="legend" id="legend"></div>
+    <p class="hint">提示：表头的行名可以点击，切换“正在查看哪一行”。</p>
+  </section>
+
+  <section class="panel" id="info-panel">
+    <h2 id="step-title">…</h2>
+    <div id="step-body"></div>
+    <div id="step-widgets"></div>
+  </section>
+</div>
+
+<footer>M1D 交互演示 · 配合 <a href="M01D-trainable-bigram.html">M01D 教材</a>使用 · 数字与教材实测一致</footer>
+</main>
+
+<script>
+/*__MATH_START__*/
+const TOKENS = ["你", "我", "爱", "狗", "猫", "<BOS>", "<EOS>"];
+const V = 7;
+const ID = { "你": 0, "我": 1, "爱": 2, "狗": 3, "猫": 4, "<BOS>": 5, "<EOS>": 6 };
+const X = [5, 1, 2, 4, 5, 1, 2, 3, 5, 0, 2, 4];
+const Y = [1, 2, 4, 6, 1, 2, 3, 6, 0, 2, 4, 6];
+const CKPTS = [0, 1, 2, 5, 10, 25, 50, 100, 200, 400, 600, 800, 1000];
+
+function softmax(row) {
+  let m = -Infinity;
+  for (const v of row) if (v > m) m = v;
+  const ex = row.map(v => Math.exp(v - m));
+  const s = ex.reduce((a, b) => a + b, 0);
+  return ex.map(e => e / s);
+}
+
+function rowCE(row, yi) { return -Math.log(Math.max(softmax(row)[yi], 1e-12)); }
+
+function meanLoss(table) {
+  let t = 0;
+  for (let i = 0; i < X.length; i++) t += rowCE(table[X[i]], Y[i]);
+  return t / X.length;
+}
+
+function trainAll() {
+  const table = Array.from({ length: V }, () => new Array(V).fill(0));
+  const snaps = {}, lossCurve = [];
+  for (let step = 0; step <= 1000; step++) {
+    lossCurve.push(meanLoss(table));
+    if (CKPTS.includes(step)) snaps[step] = { table: table.map(r => r.slice()), loss: lossCurve[step] };
+    if (step === 1000) break;
+    const grad = Array.from({ length: V }, () => new Array(V).fill(0));
+    for (let i = 0; i < X.length; i++) {
+      const p = softmax(table[X[i]]);
+      for (let j = 0; j < V; j++) grad[X[i]][j] += p[j] - (j === Y[i] ? 1 : 0);
+    }
+    for (let r = 0; r < V; r++) for (let c = 0; c < V; c++) table[r][c] -= grad[r][c] / X.length;
+  }
+  return { snaps, lossCurve };
+}
+
+const TRAIN = trainAll();
+
+// 第 7 步的单样本演示：对 (爱→猫) 做一次 backward + step（lr=1.0，从全零开始）
+function singleStepDemo() {
+  const grad = Array.from({ length: V }, () => new Array(V).fill(0));
+  const p = softmax(new Array(V).fill(0)); // 全零表里“爱”这一行
+  for (let j = 0; j < V; j++) grad[ID["爱"]][j] = p[j] - (j === ID["猫"] ? 1 : 0);
+  const table = Array.from({ length: V }, () => new Array(V).fill(0));
+  for (let j = 0; j < V; j++) table[ID["爱"]][j] = -grad[ID["爱"]][j];
+  const probs = softmax(table[ID["爱"]]);
+  return { grad, table, pCat: probs[ID["猫"]], loss: -Math.log(probs[ID["猫"]]) };
+}
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sampleFrom(probs, rng) {
+  const r = rng();
+  let acc = 0;
+  for (let j = 0; j < V; j++) { acc += probs[j]; if (r < acc) return j; }
+  return V - 1;
+}
+
+function genProbs(table, row, temperature) {
+  const s = table[row].slice();
+  s[ID["<BOS>"]] = -Infinity; // 正文里不许出现句首牌
+  return softmax(s.map(v => v / temperature));
+}
+/*__MATH_END__*/
+
+// ================= DOM 渲染 =================
+const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const f3 = v => (Math.abs(v) < 5e-4 ? "0" : v.toFixed(3));
+const f2 = v => (Math.abs(v) < 5e-4 ? "0" : v.toFixed(2));
+
+const S = {
+  step: 0,            // 0 = 未开始
+  mode: "logits",     // logits | prob | grad | hidden
+  table: null,        // 当前展示的 7x7 数值
+  grad: null,
+  hlRow: -1, hlCell: null,
+  viewRow: ID["爱"],
+  iter: 0,
+};
+
+const stepperEl = document.getElementById("stepper");
+const stepTitle = document.getElementById("step-title");
+const stepBody = document.getElementById("step-body");
+const stepW = document.getElementById("step-widgets");
+const legendEl = document.getElementById("legend");
+const matrixTitle = document.getElementById("matrix-title");
+const navHint = document.getElementById("nav-hint");
+
+// ---- 矩阵 ----
+function buildMatrix() {
+  let html = '<table class="matrix"><thead><tr><th class="corner"></th>';
+  for (const t of TOKENS) html += `<th>${esc(t)}</th>`;
+  html += "</tr></thead><tbody>";
+  for (let r = 0; r < V; r++) {
+    html += `<tr data-row="${r}"><th class="rowlab" data-row="${r}">${esc(TOKENS[r])}</th>`;
+    for (let c = 0; c < V; c++) html += `<td data-cell="${r}-${c}"></td>`;
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+  document.getElementById("matrix-wrap").innerHTML = html;
+  document.querySelectorAll("th.rowlab").forEach(th => {
+    th.addEventListener("click", () => { S.viewRow = +th.dataset.row; render(); });
+  });
+}
+
+function cellStyle(v, mode, scale) {
+  if (mode === "prob") {
+    const a = Math.min(0.85, 0.08 + 0.92 * (v / scale));
+    return `background: rgba(36,107,70,${a.toFixed(3)})`;
+  }
+  const a = Math.min(0.85, 0.08 + 0.92 * (Math.abs(v) / scale));
+  return v >= 0 ? `background: rgba(36,107,70,${a.toFixed(3)})` : `background: rgba(153,61,56,${a.toFixed(3)})`;
+}
+
+function renderMatrix() {
+  const wrap = document.getElementById("matrix-wrap");
+  if (S.mode === "hidden") { wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  const src = S.mode === "grad" ? S.grad : S.table;
+  const show = [];
+  let scale = 1e-9;
+  for (let r = 0; r < V; r++) for (let c = 0; c < V; c++) {
+    const raw = src[r][c];
+    const v = S.mode === "prob" ? softmax(S.table[r])[c] : raw;
+    show.push(v); scale = Math.max(scale, Math.abs(v));
+  }
+  let k = 0;
+  for (let r = 0; r < V; r++) {
+    const tr = wrap.querySelector(`tr[data-row="${r}"]`);
+    const rowDim = S.hlRow >= 0 && r !== S.hlRow && S.dimOthers;
+    tr.classList.toggle("dim-row", !!rowDim);
+    tr.classList.toggle("hl-row", r === S.hlRow);
+    for (let c = 0; c < V; c++) {
+      const td = tr.querySelector(`td[data-cell="${r}-${c}"]`);
+      const v = show[k++];
+      td.className = "";
+      if (S.hlCell && S.hlCell[0] === r && S.hlCell[1] === c) td.classList.add("hl-cell");
+      else if (rowDim) td.classList.add("dim");
+      if (S.mode === "prob") td.innerHTML = `${f3(v)}<span class="cell-name">${esc(TOKENS[c])}</span>`;
+      else td.textContent = f2(v);
+      td.setAttribute("style", cellStyle(v, S.mode === "prob" ? "prob" : "num", scale));
+    }
+  }
+}
+
+function renderLegend() {
+  if (S.mode === "prob") {
+    legendEl.innerHTML = `<span><span class="swatch" style="background:rgba(36,107,70,.75)"></span>颜色越深 = 概率越大</span><span>每行加起来 = 1</span>`;
+  } else if (S.mode === "grad") {
+    legendEl.innerHTML = `<span><span class="swatch" style="background:rgba(36,107,70,.75)"></span>负梯度：这个数要加大</span><span><span class="swatch" style="background:rgba(153,61,56,.75)"></span>正梯度：这个数要减小</span><span>0 = 不动</span>`;
+  } else {
+    legendEl.innerHTML = `<span><span class="swatch" style="background:rgba(36,107,70,.75)"></span>正分数</span><span><span class="swatch" style="background:rgba(153,61,56,.75)"></span>负分数</span><span>这是 logits，不是概率</span>`;
+  }
+}
+
+function render() {
+  renderMatrix(); renderLegend(); renderStepper();
+  document.getElementById("btn-prev").disabled = S.step <= 1;
+  document.getElementById("btn-next").disabled = S.step >= STEPS.length;
+  navHint.textContent = S.step > 0 ? `第 ${S.step} 步 / 共 ${STEPS.length} 步` : "";
+}
+
+function renderStepper() {
+  stepperEl.innerHTML = "";
+  STEPS.forEach((st, i) => {
+    const b = document.createElement("button");
+    b.textContent = st.short;
+    b.className = i + 1 === S.step ? "on" : "";
+    b.addEventListener("click", () => gotoStep(i + 1));
+    stepperEl.appendChild(b);
+  });
+}
+
+// ---- 小组件 ----
+function barsHTML(probs, opts = {}) {
+  const maxP = Math.max(...probs.filter(p => p > 0));
+  const rows = TOKENS.map((t, j) => {
+    const p = probs[j];
+    const masked = p === 0 || !isFinite(p);
+    const picked = opts.picked === j;
+    const width = masked ? 0 : Math.max(1.5, p / maxP * 100);
+    return `<div class="bar-row ${picked ? "picked" : ""} ${masked ? "masked" : ""}">
+      <span class="lab">${esc(t)}</span>
+      <div class="track"><div class="fill" style="width:${width.toFixed(1)}%"></div></div>
+      <b>${masked ? "屏蔽" : f3(p)}${picked ? " ←抽中" : ""}</b></div>`;
+  }).join("");
+  return `<div class="bars">${rows}</div>`;
+}
+
+function sampChipsHTML() {
+  return X.map((xi, i) => `<span class="chip samp">${esc(TOKENS[xi])} → <b>${esc(TOKENS[Y[i]])}</b></span>`).join("");
+}
+
+function lossCurveSVG(curIdx) {
+  const curve = TRAIN.lossCurve;
+  const W = 320, H = 130, PAD = 26;
+  const lo = 0.25, hi = 2.05;
+  const pts = [];
+  for (let i = 0; i <= 1000; i += 5) {
+    const x = PAD + (W - PAD - 8) * (i / 1000);
+    const y = 8 + (H - 8 - PAD) * (1 - (curve[i] - lo) / (hi - lo));
+    pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+  const gridY = [0.5, 1.0, 1.5, 2.0].map(v => {
+    const y = 8 + (H - 8 - PAD) * (1 - (v - lo) / (hi - lo));
+    return `<line x1="${PAD}" y1="${y}" x2="${W - 8}" y2="${y}" stroke="var(--line)" stroke-dasharray="3 3"/>
+            <text x="4" y="${y + 3}" font-size="9" fill="var(--muted)">${v}</text>`;
+  }).join("");
+  const ci = CKPTS[curIdx];
+  const cx = PAD + (W - PAD - 8) * (ci / 1000);
+  const cy = 8 + (H - 8 - PAD) * (1 - (curve[ci] - lo) / (hi - lo));
+  return `<svg class="loss-svg" viewBox="0 0 ${W} ${H}">
+    ${gridY}
+    <polyline points="${pts.join(" ")}" fill="none" stroke="var(--green)" stroke-width="2"/>
+    <circle cx="${cx}" cy="${cy}" r="4.5" fill="var(--green)" stroke="#fff" stroke-width="1.5"/>
+    <text x="${PAD}" y="${H - 6}" font-size="9" fill="var(--muted)">0 轮</text>
+    <text x="${W - 34}" y="${H - 6}" font-size="9" fill="var(--muted)">1000 轮</text>
+  </svg>`;
+}
+
+// ---- 各步定义 ----
+const STEPS = [
+  {
+    short: "1 语料", title: "第 1 步：三句话和 7 个 token",
+    enter() {
+      S.mode = "hidden"; S.table = TRAIN.snaps[0].table; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
+      matrixTitle.textContent = "7 × 7 分数表（第 3 步才登场）";
+      stepBody.innerHTML = `<p>训练语料还是那三句。数出 7 个不重复 token（含句首牌、句尾牌），给每个分一个 ID：</p>
+        <div class="widget"><h4>stoi：token → ID</h4><div class="chips">${TOKENS.map(t => `<span class="chip id">${esc(t)} → ${ID[t]}</span>`).join("")}</div></div>
+        <p class="hint">接下来所有表都按这套编号：行 = 当前 token，列 = 下一个 token。注意“爱”是 2 号，“猫”是 4 号，后面反复出现。</p>`;
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "2 样本", title: "第 2 步：拆出 12 道题和答案",
+    enter() {
+      S.mode = "hidden";
+      stepBody.innerHTML = `<p>每句话首尾加上 <code>&lt;BOS&gt;</code>/<code>&lt;EOS&gt;</code>，相邻两两配对，得到 12 对样本。左边 <b>x</b>：当前 token；右边加粗 <b>y</b>：正确答案。</p>
+        <div class="widget"><h4>x → y（共 12 条）</h4><div class="chips">${sampChipsHTML()}</div></div>
+        <p class="hint">数一数：“爱 → 猫”出现 2 次，“爱 → 狗”出现 1 次。这个 2:1 就是模型最终要学出的比例。</p>`;
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "3 建表", title: "第 3 步：一张全零的分数表",
+    enter() {
+      S.mode = "logits"; S.table = TRAIN.snaps[0].table; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
+      matrixTitle.textContent = "7 × 7 分数表（初始：全 0）";
+      stepBody.innerHTML = `<p>这张表就是模型本体：<strong>49 个可以被训练修改的分数</strong>。行是当前 token，列是下一个 token。现在故意全部置 0，方便核对。</p>
+        <p>小心一个区分：M1B 的表存的是<strong>出现次数</strong>；这里的 0 是<strong>还没变成概率的分数</strong>（logit），不是“出现 0 次”，也不是“概率为 0”。</p>
+        <p class="hint">点击“下一步”开始查表。</p>`;
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "4 查表", title: `第 4 步：输入“爱”，取出第 ${ID["爱"]} 行`,
+    enter() {
+      S.mode = "logits"; S.table = TRAIN.snaps[0].table;
+      S.hlRow = S.viewRow; S.hlCell = null; S.dimOthers = true;
+      matrixTitle.textContent = "查表：table(输入 ID) → 返回那一行";
+      stepBody.innerHTML = `<p><code>one_x = [${S.viewRow}]</code>（“${esc(TOKENS[S.viewRow])}”）。<code>table(one_x)</code> 做的事就是<strong>按 ID 取行</strong>：返回 1 行 × 7 列的分数，因为只问了 1 条题、有 7 个候选。</p>
+        <div class="widget"><h4>取出的这一行（logits）</h4>
+          <div class="chips">${TOKENS.map((t, j) => `<span class="chip id">${esc(t)}:${f2(S.table[S.viewRow][j])}</span>`).join("")}</div>
+          <p class="hint">形状 [1, 7]。此刻全是 0——模型还什么都不知道。这一步<b>不需要正确答案</b>：答案到第 6 步评分才出场。</p></div>
+        <p class="hint">想看别的行？点击左侧表的行名即可切换。</p>`;
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "5 softmax", title: "第 5 步：这行分数 → 一行概率",
+    enter() {
+      S.mode = "prob"; S.table = TRAIN.snaps[0].table;
+      S.hlRow = S.viewRow; S.hlCell = null; S.dimOthers = false;
+      matrixTitle.textContent = "softmax 后：每行是一组概率（行和 = 1）";
+      const p = softmax(S.table[S.viewRow]);
+      stepBody.innerHTML = `<p>分数不能当概率用（可以是负数、加起来不是 1）。<code>F.softmax(行, dim=-1)</code> 把这一行变成概率：<strong>每个分数取指数，再除以总和</strong>。7 个 0 的指数都是 1，于是平分：</p>
+        <div class="widget"><h4>P(下一个 | ${esc(TOKENS[S.viewRow])})</h4>${barsHTML(p)}</div>
+        <p class="hint">每个候选 ${f3(1 / 7)}——这是“7 选 1 均匀瞎猜”。训练要做的，就是把“猫”那根柱子抬高。</p>`;
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "6 算 loss", title: "第 6 步：拿正确答案打分",
+    enter() {
+      S.mode = "prob"; S.table = TRAIN.snaps[0].table;
+      S.hlRow = ID["爱"]; S.hlCell = [ID["爱"], ID["猫"]]; S.dimOthers = false; S.viewRow = ID["爱"];
+      const p = softmax(S.table[ID["爱"]])[ID["猫"]];
+      stepBody.innerHTML = `<p>现在答案才登场：<code>one_y = [${ID["猫"]}]</code>（“猫”）。评分规则是 M1C 的公式：<strong>loss = −log(模型给正确答案的概率)</strong>。表中亮框的格子，就是这次要打分的对象。</p>
+        <div class="widget"><h4>手算过程</h4>
+          <div class="kv">
+            <span>给“猫”的概率</span><b>${f3(p)}</b>
+            <span>log(概率)</span><b>−1.946</b>
+            <span>加负号 → loss</span><b class="big-num">${f3(-Math.log(p))}</b>
+          </div></div>
+        <p class="hint">−log(1/7) = log 7 ≈ 1.95，正好是“均匀瞎猜”的分数。同一行代码 <code>F.cross_entropy(logits, y)</code> 算出的也是这个数——它只是把 softmax + 取答案概率 + −log 打包了。</p>`;
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "7 学一次", title: "第 7 步：backward 改表，亲眼看一次",
+    enter() {
+      const d = singleStepDemo();
+      S.mode = "grad"; S.grad = d.grad; S.table = TRAIN.snaps[0].table;
+      S.hlRow = ID["爱"]; S.hlCell = null; S.dimOthers = false; S.viewRow = ID["爱"];
+      matrixTitle.textContent = "backward() 算出的梯度（只有“爱”这行非零）";
+      stepBody.innerHTML = `<p>针对这一条样本（爱 → 猫）做一次 <code>backward()</code>。梯度回答的问题是：<strong>每个格子加大一点点，loss 会升还是降？</strong>看“爱”这一行：</p>
+        <div class="widget"><h4>“爱”这一行的梯度</h4>
+          <div class="chips">${TOKENS.map((t, j) => `<span class="chip id">${esc(t)}:${f2(d.grad[ID["爱"]][j])}</span>`).join("")}</div>
+          <p class="hint">“猫”是 −0.857（加大它，loss 会降）；其余 +0.143（加大它们，loss 会升）。此刻<b>表还没变</b>——梯度只是建议。</p></div>
+        <div class="ctl-row"><button class="btn primary" id="do-step">执行 optimizer.step() 改表 →</button></div>`;
+      document.getElementById("do-step").addEventListener("click", () => {
+        S.mode = "logits"; S.table = d.table; S.hlCell = [ID["爱"], ID["猫"]];
+        matrixTitle.textContent = "step() 之后：表被真正修改了";
+        stepBody.innerHTML = `<p><code>step()</code> 按“新分数 = 旧分数 − lr × 梯度”执行修改。全表中只有“爱”这一行变了（这次只学了它）：</p>
+          <div class="widget"><h4>改完再走一遍第 5–6 步的流程</h4>
+            ${barsHTML(softmax(d.table[ID["爱"]]), { picked: ID["猫"] })}
+            <div class="kv" style="margin-top:8px">
+              <span>P(猫|爱)</span><b>0.143 → <span style="color:var(--green)">${f3(d.pCat)}</span></b>
+              <span>这道题的 loss</span><b>1.946 → <span style="color:var(--green)">${f3(d.loss)}</span></b>
+            </div></div>
+          <p class="hint">一次更新，概率从 1/7 抬到 ${f3(d.pCat)}。但注意：这次只学了“爱→猫”，把“狗”压下去了——下一页把 12 条样本一起学。</p>`;
+        render();
+      });
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "8 全体样本", title: "第 8 步：12 条样本一起上（重新从全零开始）",
+    enter() {
+      S.mode = "logits"; S.table = TRAIN.snaps[0].table;
+      S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
+      matrixTitle.textContent = "7 × 7 分数表（正式实验：全 0 起步）";
+      stepBody.innerHTML = `<p>单样本演示结束，把表清零，正式实验开始。12 条样本<b>共用这一张表</b>：</p>
+        <div class="widget"><h4>谁在用这张表？</h4><div class="chips">${sampChipsHTML()}</div></div>
+        <p>关键在这两条：<code>x[2]</code> 和 <code>x[6]</code> 都是“爱”，查出<b>同一行分数</b>；但一个答案是“猫”、一个是“狗”。loss 会同时要求这行既像 2/3 又像 1/3——最后它只能折中成 2:1。这就是 Bigram 的天花板：<strong>它只有一行可用，记不住更长的上文</strong>。</p>
+        <p class="hint">点“下一步”，按下播放，看这行怎么被 1000 轮训练慢慢掰到 2:1。</p>`;
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "9 训练", title: "第 9 步：训练 1000 轮（真实梯度下降）",
+    enter() {
+      S.mode = "logits"; S.hlRow = ID["爱"]; S.hlCell = null; S.dimOthers = false;
+      matrixTitle.textContent = "分数表：训练中（颜色 = 数值大小）";
+      let cur = 0, playing = null;
+      const paint = () => {
+        const it = CKPTS[cur];
+        S.table = TRAIN.snaps[it].table;
+        const p = softmax(S.table[ID["爱"]]);
+        stepBody.innerHTML = `<p>下面这张 loss 曲线和表里的数值，都是浏览器里<strong>真实跑出来的</strong>（和教材第 9 步打印的数字一致）。拖动滑块或按播放，回到任意时刻的表。</p>
+          <div class="widget"><h4>训练到第 ${it} 轮</h4>
+            ${lossCurveSVG(cur)}
+            <div class="kv" style="margin-top:6px">
+              <span>平均 loss</span><b class="big-num">${TRAIN.lossCurve[it].toFixed(4)}</b>
+              <span>P(猫|爱) 此刻</span><b>${f3(p[ID["猫"]])}（目标 2/3 ≈ 0.667）</b>
+              <span>P(狗|爱) 此刻</span><b>${f3(p[ID["狗"]])}（目标 1/3 ≈ 0.333）</b>
+            </div>
+            <div class="ctl-row">
+              <button class="btn primary" id="play-btn">${playing ? "暂停" : "▶ 播放训练"}</button>
+              <input type="range" id="iter-slider" min="0" max="${CKPTS.length - 1}" step="1" value="${cur}" style="flex:1">
+            </div>
+            <p class="curve-note">loss 从 1.946（瞎猜）一路降到 ${TRAIN.lossCurve[1000].toFixed(4)}——注意它不降到 0：同一行要同时养活“猫”和“狗”，天花板大约在 0.32。</p></div>`;
+        document.getElementById("iter-slider").addEventListener("input", e => {
+          stopPlay(); cur = +e.target.value; paint(); render();
+        });
+        document.getElementById("play-btn").addEventListener("click", () => {
+          if (playing) { stopPlay(); paint(); return; }
+          if (cur >= CKPTS.length - 1) cur = 0;
+          playing = setInterval(() => {
+            cur++;
+            paint(); render();
+            if (cur >= CKPTS.length - 1) { stopPlay(); paint(); }
+          }, 650);
+          paint();
+        });
+        render();
+      };
+      const stopPlay = () => { if (playing) { clearInterval(playing); playing = null; } };
+      this._cleanup = stopPlay;
+      paint();
+      stepW.innerHTML = "";
+    },
+    leave() { if (this._cleanup) this._cleanup(); },
+  },
+  {
+    short: "10 读结果", title: "第 10 步：梯度学到的 vs 数出来的",
+    enter() {
+      S.mode = "prob"; S.table = TRAIN.snaps[1000].table;
+      S.hlRow = ID["爱"]; S.hlCell = null; S.dimOthers = false;
+      matrixTitle.textContent = "训练 1000 轮后：softmax 视角（每行和 = 1）";
+      const p = softmax(S.table[ID["爱"]]);
+      stepBody.innerHTML = `<p>训练结束。读“爱”这一行，和 M1B 你亲手数出来的比一比：</p>
+        <div class="widget"><h4>P(下一个 | 爱)，训练后</h4>${barsHTML(p)}</div>
+        <div class="compare">
+          <div class="col"><h5>梯度学出来的（M1D）</h5>
+            <div class="kv"><span>P(猫|爱)</span><b>${f3(p[ID["猫"]])}</b><span>P(狗|爱)</span><b>${f3(p[ID["狗"]])}</b><span>平均 loss</span><b>${TRAIN.lossCurve[1000].toFixed(4)}</b></div></div>
+          <div class="col"><h5>数出来的（M1B/M1C）</h5>
+            <div class="kv"><span>P(猫|爱)</span><b>2/3 ≈ 0.667</b><span>P(狗|爱)</span><b>1/3 ≈ 0.333</b><span>平均 loss</span><b>0.318</b></div></div>
+        </div>
+        <p>可训练模型从头到尾没数过一次次数，最后却停在计数表的答案旁边——<strong>同一个答案，两条路</strong>。这就是整门课最重要的一条结论：loss 定了，学到的规律就是 loss 逼出来的。</p>`;
+      stepW.innerHTML = "";
+    },
+  },
+  {
+    short: "11 生成", title: "第 11 步：用学到的概率接龙",
+    enter() {
+      S.mode = "prob"; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
+      matrixTitle.textContent = "生成中：当前行高亮，按概率抽下一个字";
+      let seed = 0, busy = false, timer = null;
+      this._cleanup = () => { if (timer) clearInterval(timer); };
+      const paintIdle = () => {
+        stepBody.innerHTML = `<p>训练只给了表；生成是<strong>拿着表接龙</strong>：从 <code>&lt;BOS&gt;</code> 行开始，按概率抽一个字，再跳到那个字的行，反复直到抽出 <code>&lt;EOS&gt;</code>。BOS 列被屏蔽（正文里不该再出现句首牌）。</p>
+          <div class="widget"><h4>试一试</h4>
+            <div class="ctl-row">
+              <label><input type="radio" name="which" value="after" checked> 训练后</label>
+              <label><input type="radio" name="which" value="before"> 训练前（全零表）</label>
+            </div>
+            <div class="ctl-row">
+              <span>temperature <b id="tv">1.0</b></span>
+              <input type="range" id="temp" min="0.1" max="3" step="0.1" value="1" style="flex:1">
+            </div>
+            <div class="ctl-row"><button class="btn primary" id="gen-btn">生成一句</button></div>
+            <div class="seq-out" id="seq"></div>
+            <div id="gen-bars"></div>
+            <p class="hint">训练前 = 乱抽（可能出现空句或怪串）；训练后 = “我/你→爱→猫/狗→结束”。温度 &lt;1 更保守，&gt;1 更放飞。</p></div>`;
+        document.getElementById("temp").addEventListener("input", e => {
+          document.getElementById("tv").textContent = (+e.target.value).toFixed(1);
+        });
+        document.getElementById("gen-btn").addEventListener("click", runGen);
+      };
+      const runGen = () => {
+        if (busy) return;
+        busy = true;
+        const which = document.querySelector('input[name="which"]:checked').value;
+        const T = +document.getElementById("temp").value;
+        const table = which === "after" ? TRAIN.snaps[1000].table : TRAIN.snaps[0].table;
+        const rng = mulberry32(1000 + seed++);
+        const seqEl = document.getElementById("seq");
+        const barsEl = document.getElementById("gen-bars");
+        seqEl.innerHTML = ""; barsEl.innerHTML = "";
+        let cur = ID["<BOS>"], out = [], n = 0;
+        const tick = () => {
+          const probs = genProbs(table, cur, T);
+          const nxt = sampleFrom(probs, rng);
+          S.hlRow = cur; S.table = table; S.mode = "prob";
+          // 概率经过温度与屏蔽，直接展示它
+          const shown = probs;
+          barsEl.innerHTML = `<h4 style="font-size:13px;margin:10px 0 4px">当前 token：${esc(TOKENS[cur])}，从这行抽 →</h4>` + barsHTML(shown, { picked: nxt });
+          const chip = document.createElement("span");
+          chip.className = "tok" + (nxt === ID["<EOS>"] ? " eos" : "");
+          chip.textContent = TOKENS[nxt];
+          seqEl.appendChild(chip);
+          render();
+          if (nxt === ID["<EOS>"] || ++n >= 20) {
+            clearInterval(timer); timer = null; busy = false;
+            S.hlRow = -1; render();
+            return;
+          }
+          out.push(TOKENS[nxt]); cur = nxt;
+        };
+        tick();
+        if (busy) timer = setInterval(tick, 700);
+      };
+      paintIdle();
+      stepW.innerHTML = "";
+    },
+    leave() { if (this._cleanup) this._cleanup(); },
+  },
+];
+
+function gotoStep(n) {
+  const prev = STEPS[S.step - 1];
+  if (prev && prev.leave) prev.leave();
+  S.step = n;
+  stepTitle.textContent = STEPS[n - 1].title;
+  STEPS[n - 1].enter();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  render();
+}
+
+document.getElementById("btn-prev").addEventListener("click", () => { if (S.step > 1) gotoStep(S.step - 1); });
+document.getElementById("btn-next").addEventListener("click", () => { if (S.step < STEPS.length) gotoStep(S.step + 1); });
+
+buildMatrix();
+gotoStep(1);
+</script>
+</body>
+</html>
