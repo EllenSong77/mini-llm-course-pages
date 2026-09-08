@@ -428,14 +428,21 @@ const STEPS = [
       document.getElementById("do-step").addEventListener("click", () => {
         S.mode = "logits"; S.table = d.table; S.hlCell = [ID["爱"], ID["猫"]];
         matrixTitle.textContent = "step() 之后：表被真正修改了";
+        const pc = softmax(d.table[ID["爱"]])[ID["猫"]];
+        const exCat = Math.exp(d.table[ID["爱"]][ID["猫"]]);
+        const exOther = Math.exp(d.table[ID["爱"]][ID["狗"]]);
+        const total = exCat + 6 * exOther;
         stepBody.innerHTML = `<p><code>step()</code> 按“新分数 = 旧分数 − lr × 梯度”执行修改。全表中只有“爱”这一行变了（这次只学了它）：</p>
-          <div class="widget"><h4>改完再走一遍第 5–6 步的流程</h4>
+          <div class="widget"><h4>改完的分数，是怎么变成 P(猫)=${f3(pc)} 的？</h4>
+            <p style="margin:4px 0">① “爱”这一行现在是：<b>猫 0.857</b>，其他 6 个各 <b>−0.143</b></p>
+            <p style="margin:4px 0">② 每个分数取指数：猫 e<sup>0.857</sup> ≈ <b>${exCat.toFixed(2)}</b>，其余每个 e<sup>−0.143</sup> ≈ ${exOther.toFixed(2)}</p>
+            <p style="margin:4px 0">③ 总和 = ${exCat.toFixed(2)} + 6 × ${exOther.toFixed(2)} ≈ <b>${total.toFixed(2)}</b>，猫分到 ${exCat.toFixed(2)} / ${total.toFixed(2)} ≈ <b>${f3(pc)}</b></p>
             ${barsHTML(softmax(d.table[ID["爱"]]), { picked: ID["猫"] })}
             <div class="kv" style="margin-top:8px">
-              <span>P(猫|爱)</span><b>0.143 → <span style="color:var(--green)">${f3(d.pCat)}</span></b>
+              <span>P(猫|爱)</span><b>0.143 → <span style="color:var(--green)">${f3(pc)}</span></b>
               <span>这道题的 loss</span><b>1.946 → <span style="color:var(--green)">${f3(d.loss)}</span></b>
             </div></div>
-          <p class="hint">一次更新，概率从 1/7 抬到 ${f3(d.pCat)}。但注意：这次只学了“爱→猫”，把“狗”压下去了——下一页把 12 条样本一起学。</p>`;
+          <p class="hint">一次更新，概率从 1/7 抬到 ${f3(pc)}。但注意：这次只学了“爱→猫”，把“狗”压下去了——下一页把 12 条样本一起学。</p>`;
         render();
       });
       stepW.innerHTML = "";
