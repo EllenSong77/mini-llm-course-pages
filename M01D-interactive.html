@@ -60,6 +60,23 @@
     .pipe .stage { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 4px 0; }
     .pipe .op { color: var(--muted); font-size: 13px; padding: 0 6px; line-height: 1.5; }
     .hint { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+    /* ---- 常驻名词地图 ---- */
+    .nouns { position: sticky; top: 0; z-index: 40; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; margin-top: 14px; padding: 10px 12px; }
+    .nouns .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+    .nouns .bar b { font-size: 13px; }
+    .nouns .n { border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; background: var(--soft); transition: all .25s ease; }
+    .nouns .n small { color: var(--muted); font-weight: 400; }
+    .nouns .n.hot { background: var(--green); border-color: var(--green); color: #fff; font-weight: 750; }
+    .nouns .n.hot small { color: #eafff2; }
+    .nouns .arrow { color: var(--muted); }
+    .nouns .why { font-size: 12px; color: var(--muted); margin-top: 6px; display: none; }
+    .nouns.open .why { display: block; }
+    .nouns .toggle { margin-left: auto; border: 1px solid var(--line); background: var(--soft); color: var(--muted); border-radius: 8px; padding: 2px 9px; cursor: pointer; font-size: 12px; }
+    .why table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .why th, .why td { border: 1px solid var(--line); padding: 4px 7px; font-size: 12px; text-align: left; }
+    .why th { color: var(--muted); font-weight: 650; background: var(--soft); }
+    .why .loop { margin: 8px 0 2px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.7; }
+    @media (max-width: 860px) { .nouns .bar { font-size: 12px; } .nouns .n { padding: 2px 6px; } }
     .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
     @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
     .compare .col { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
@@ -88,8 +105,36 @@
 </section>
 
 <div class="viz-grid">
-  <section class="panel" id="matrix-panel">
-    <h2 id="matrix-title">7 × 7 分数表</h2>
+<section class="panel" id="matrix-panel">
+  <div class="nouns" id="nouns-card">
+    <div class="bar">
+      <b>名词地图</b>
+      <span class="n" data-k="weight">权重<small>＝分数＝weight＝logits</small></span>
+      <span class="arrow">→softmax→</span>
+      <span class="n" data-k="prob">概率<small>每行和=1</small></span>
+      <span class="arrow">→取答案·−log→</span>
+      <span class="n" data-k="loss">loss<small>一个数</small></span>
+      <span class="arrow">→backward→</span>
+      <span class="n" data-k="grad">梯度<small>＝权重的改法</small></span>
+      <span class="arrow">→step→</span>
+      <span class="n" data-k="weight2">新权重<small>回到开头</small></span>
+      <button class="toggle" id="nouns-toggle">展开对照表</button>
+    </div>
+    <div class="why">
+      <div class="loop">权重 --softmax--> 概率 --取正确答案那个,加−log--> loss --backward()--> 梯度 --step(): 权重 − lr×梯度 --> 新权重（循环）</div>
+      <table>
+        <thead><tr><th>名字</th><th>它是什么</th><th>形状</th><th>谁能改它</th></tr></thead>
+        <tbody>
+          <tr><td><b>权重</b>（口语：分数；代码：<code>weight</code>；教材/论文：logits 的来源）</td><td>模型内部存的数，训练改的就是它</td><td>[7, 7]</td><td>只有 <code>optimizer.step()</code></td></tr>
+          <tr><td><b>概率</b></td><td>一行权重 softmax 的结果，同一行加起来 = 1</td><td>[7, 7] 或一行</td><td>没人改它；权重变了它跟着变</td></tr>
+          <tr><td><b>loss</b></td><td>正确答案概率的 −log，衡量这次猜得多差</td><td>一个数</td><td>没人改它；权重和答案决定它</td></tr>
+          <tr><td><b>梯度</b></td><td>每个权重该加还是减、力度多大；= 概率 − 正确答案</td><td>[7, 7]（和权重同形状）</td><td><code>backward()</code> 生成，用一次就换</td></tr>
+        </tbody>
+      </table>
+      <p style="margin:6px 0 0">读页面时对号：左表里的数 = 权重（或梯度，看标题）；概率条上的数 = 概率；单独一个大数 = loss。</p>
+    </div>
+  </div>
+  <h2 id="matrix-title">7 × 7 分数表</h2>
     <div id="matrix-wrap"></div>
     <div class="legend" id="legend"></div>
     <p class="hint">提示：表头的行名可以点击，切换“正在查看哪一行”。</p>
@@ -274,8 +319,15 @@ function renderLegend() {
   }
 }
 
+function setNounsHot(keys) {
+  document.querySelectorAll("#nouns-card .n").forEach(el => {
+    el.classList.toggle("hot", keys.includes(el.dataset.k) || keys.includes("weight") && el.dataset.k === "weight2");
+  });
+}
+
 function render() {
   renderMatrix(); renderLegend(); renderStepper();
+  if (STEPS[S.step - 1] && STEPS[S.step - 1].nouns) setNounsHot(STEPS[S.step - 1].nouns);
   document.getElementById("btn-prev").disabled = S.step <= 1;
   document.getElementById("btn-next").disabled = S.step >= STEPS.length;
   navHint.textContent = S.step > 0 ? `第 ${S.step} 步 / 共 ${STEPS.length} 步` : "";
@@ -342,7 +394,7 @@ function lossCurveSVG(curIdx) {
 // ---- 各步定义 ----
 const STEPS = [
   {
-    short: "1 语料", title: "第 1 步：三句话和 7 个 token",
+    short: "1 语料", nouns: [], title: "第 1 步：三句话和 7 个 token",
     enter() {
       S.mode = "hidden"; S.table = TRAIN.snaps[0].table; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
       matrixTitle.textContent = "7 × 7 分数表（第 3 步才登场）";
@@ -353,7 +405,7 @@ const STEPS = [
     },
   },
   {
-    short: "2 样本", title: "第 2 步：拆出 12 道题和答案",
+    short: "2 样本", nouns: [], title: "第 2 步：拆出 12 道题和答案",
     enter() {
       S.mode = "hidden";
       stepBody.innerHTML = `<p>每句话首尾加上 <code>&lt;BOS&gt;</code>/<code>&lt;EOS&gt;</code>，相邻两两配对，得到 12 对样本。左边 <b>x</b>：当前 token；右边加粗 <b>y</b>：正确答案。</p>
@@ -363,7 +415,7 @@ const STEPS = [
     },
   },
   {
-    short: "3 建表", title: "第 3 步：一张全零的分数表",
+    short: "3 建表", nouns: ['weight'], title: "第 3 步：一张全零的分数表",
     enter() {
       S.mode = "logits"; S.table = TRAIN.snaps[0].table; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
       matrixTitle.textContent = "7 × 7 分数表（初始：全 0）";
@@ -374,7 +426,7 @@ const STEPS = [
     },
   },
   {
-    short: "4 查表", title: `第 4 步：输入“爱”，取出第 ${ID["爱"]} 行`,
+    short: "4 查表", nouns: ['weight'], title: `第 4 步：输入“爱”，取出第 ${ID["爱"]} 行`,
     enter() {
       S.mode = "logits"; S.table = TRAIN.snaps[0].table;
       S.hlRow = S.viewRow; S.hlCell = null; S.dimOthers = true;
@@ -388,7 +440,7 @@ const STEPS = [
     },
   },
   {
-    short: "5 softmax", title: "第 5 步：这行分数 → 一行概率",
+    short: "5 softmax", nouns: ['weight', 'prob'], title: "第 5 步：这行分数 → 一行概率",
     enter() {
       S.mode = "prob"; S.table = TRAIN.snaps[0].table;
       S.hlRow = S.viewRow; S.hlCell = null; S.dimOthers = false;
@@ -401,7 +453,7 @@ const STEPS = [
     },
   },
   {
-    short: "6 算 loss", title: "第 6 步：拿正确答案打分",
+    short: "6 算 loss", nouns: ['prob', 'loss'], title: "第 6 步：拿正确答案打分",
     enter() {
       S.mode = "prob"; S.table = TRAIN.snaps[0].table;
       S.hlRow = ID["爱"]; S.hlCell = [ID["爱"], ID["猫"]]; S.dimOthers = false; S.viewRow = ID["爱"];
@@ -418,7 +470,7 @@ const STEPS = [
     },
   },
   {
-    short: "7 学一次", title: "第 7 步：backward 算梯度，step 改表",
+    short: "7 学一次", nouns: ['weight', 'prob', 'loss', 'grad'], title: "第 7 步：backward 算梯度，step 改表",
     enter() {
       const d = singleStepDemo();
       S.mode = "logits"; S.table = TRAIN.snaps[0].table; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
@@ -477,7 +529,7 @@ const STEPS = [
     leave() { if (this._cleanup) this._cleanup(); },
   },
   {
-    short: "8 全体样本", title: "第 8 步：12 条样本一起上（重新从全零开始）",
+    short: "8 全体样本", nouns: ['weight', 'prob'], title: "第 8 步：12 条样本一起上（重新从全零开始）",
     enter() {
       S.mode = "logits"; S.table = TRAIN.snaps[0].table;
       S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
@@ -490,7 +542,7 @@ const STEPS = [
     },
   },
   {
-    short: "9 训练", title: "第 9 步：训练 1000 轮（真实梯度下降）",
+    short: "9 训练", nouns: ['weight', 'loss'], title: "第 9 步：训练 1000 轮（真实梯度下降）",
     enter() {
       S.mode = "logits"; S.hlRow = ID["爱"]; S.hlCell = null; S.dimOthers = false;
       matrixTitle.textContent = "分数表：训练中（颜色 = 数值大小）";
@@ -535,7 +587,7 @@ const STEPS = [
     leave() { if (this._cleanup) this._cleanup(); },
   },
   {
-    short: "10 读结果", title: "第 10 步：梯度学到的 vs 数出来的",
+    short: "10 读结果", nouns: ['prob'], title: "第 10 步：梯度学到的 vs 数出来的",
     enter() {
       S.mode = "prob"; S.table = TRAIN.snaps[1000].table;
       S.hlRow = ID["爱"]; S.hlCell = null; S.dimOthers = false;
@@ -554,7 +606,7 @@ const STEPS = [
     },
   },
   {
-    short: "11 生成", title: "第 11 步：用学到的概率接龙",
+    short: "11 生成", nouns: ['prob'], title: "第 11 步：用学到的概率接龙",
     enter() {
       S.mode = "prob"; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
       matrixTitle.textContent = "生成中：当前行高亮，按概率抽下一个字";
@@ -632,6 +684,11 @@ function gotoStep(n) {
 
 document.getElementById("btn-prev").addEventListener("click", () => { if (S.step > 1) gotoStep(S.step - 1); });
 document.getElementById("btn-next").addEventListener("click", () => { if (S.step < STEPS.length) gotoStep(S.step + 1); });
+document.getElementById("nouns-toggle").addEventListener("click", () => {
+  const card = document.getElementById("nouns-card");
+  card.classList.toggle("open");
+  document.getElementById("nouns-toggle").textContent = card.classList.contains("open") ? "收起对照表" : "展开对照表";
+});
 
 buildMatrix();
 gotoStep(1);

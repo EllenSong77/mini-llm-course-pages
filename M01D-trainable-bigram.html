@@ -22,7 +22,7 @@
   <div class="actions"><a class="button secondary" href="index.html">课程入口</a><a class="button" href="M01D-interactive.html">交互演示：亲眼看训练</a></div>
 </header>
 <nav class="jump" aria-label="学习步骤">
-<a href="#map">总览</a><a href="#step-1">1–2 数据</a><a href="#step-3">3–4 建表与查表</a><a href="#step-5">5–6 概率与 loss</a><a href="#step-7">7 修改一次</a><a href="#step-8">8–10 完整训练</a><a href="#step-11">11 生成</a><a href="#step-12">对照旧版 class</a>
+<a href="#map">总览</a><a href="#nouns">名词</a><a href="#step-1">1–2 数据</a><a href="#step-3">3–4 建表与查表</a><a href="#step-5">5–6 概率与 loss</a><a href="#step-7">7 修改一次</a><a href="#step-8">8–10 完整训练</a><a href="#step-11">11 生成</a><a href="#step-12">对照旧版 class</a>
 </nav>
 <section id="map">
 <h2>先看地图：整份脚本一共做什么</h2>
@@ -35,6 +35,25 @@
 <li><strong>验收</strong>（第 10–11 步）：读出 P(猫|爱)，看它逼近 M1B 数出来的 2/3；训练前后各生成一批句子对照。</li>
 </ol>
 <p>一句话：<strong>备料 → 建表 → 打分 → 学习 → 验收</strong>。以后 300M 模型的训练脚本再复杂，骨架仍然是这五件事。</p>
+</section>
+<section id="nouns">
+<h2>四个名词，先钉死再看代码</h2>
+<p>本节会出现四种数，很容易混。先认一遍，之后任何地方看到数字，先问“它是四者中的谁”：</p>
+<table>
+<thead><tr><th>名字</th><th>它是什么</th><th>形状</th><th>怎么得到</th><th>谁能改它</th></tr></thead>
+<tbody>
+<tr><td><strong>权重</strong></td><td>模型内部存的数，训练的全部目的就是改它</td><td>[7, 7]</td><td>初始随机/置零；每轮被 step() 更新</td><td>只有 optimizer.step()</td></tr>
+<tr><td><strong>概率</strong></td><td>一行权重经 softmax 的结果，同一行加起来 = 1</td><td>[7, 7] 或一行</td><td>softmax(权重)</td><td>没人直接改；权重变它跟着变</td></tr>
+<tr><td><strong>loss</strong></td><td>正确答案概率的 −log：这次猜得多差</td><td>一个数</td><td>−log(概率里正确答案那个)</td><td>没人直接改；由权重和答案决定</td></tr>
+<tr><td><strong>梯度</strong></td><td>每个权重的改法：该加还是减、力度多大</td><td>[7, 7]（同权重）</td><td>backward()；一行公式：梯度 = 概率 − 正确答案</td><td>backward() 生成，step() 消费</td></tr>
+</tbody>
+</table>
+<p>它们连成一个环，训练就是沿这个环转圈：</p>
+<pre>权重 --softmax--> 概率 --取正确答案那个, 加−log--> loss --backward()--> 梯度
+  ↑                                                                │
+  └------------------- step(): 新权重 = 权重 − lr×梯度 <-------------┘</pre>
+<div class="callout"><strong>四个名字，一个东西。</strong>代码里那张 7×7 的表叫 <code>table.weight</code>；它的中文学名叫<strong>权重</strong>（weight）；口语常说“分数”；没过 softmax 的一行权重在教材和论文里又叫 <strong>logits</strong>。<code>table.weight</code> ＝ 权重 ＝ 分数表 ＝ logits 的来源，全是同一张表。下文混用这些名字时，指的都是它。</div>
+<div class="callout green">配套的<a href="M01D-interactive.html">交互演示页</a>右上角有这张名词地图的常驻版：走到哪一步，当前步骤涉及的量会自动高亮，页面上任何数字都可以对着它查身份。</div>
 </section>
 <section id="step-1">
 <h2>第 1 步：先写语料和 token ID</h2>
@@ -103,7 +122,7 @@ print(table.weight)               # 此刻应该看到 49 个 0
 <li><code>table.weight[2, 4]</code>：当前是“爱”时，给“猫”的分数。</li>
 </ul>
 <p>这里行列编号都从 0 开始。<code>nn.Embedding(7, 7)</code> 创建可训练的查表对象，真正存数字的地方叫 <code>table.weight</code>。第一个 7 决定有多少行，第二个 7 决定每行返回多少个数。本节这两个数都等于词表大小，因为我们直接给 7 个候选答案打分。</p>
-<p>这里的 0 是<strong>尚未变成概率的分数</strong>，不是“出现 0 次”，也不是“概率为 0”。这种原始分数叫 logit；一组分数叫 logits。</p>
+<p>这里的 0 是<strong>还没变成概率的权重</strong>（一行权重也叫 logits），不是“出现 0 次”，也不是“概率为 0”。</p>
 <p>我们故意全部置零，让下面的数字容易核对。<code>with torch.no_grad()</code> 表示这次手动初始化不用记录求梯度的过程；它本身不禁止修改参数。这种独立查表模型可以从全零开始学习，不能据此把未来整个 Transformer 都初始化为零。</p>
 
 </section>

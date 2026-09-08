@@ -218,6 +218,7 @@
       <p>第一个位置表示“现在是哪个 token”，第二个位置表示“接下来是哪个 token”。开始时所有格子都是 0，因为还没读任何句子。每看到一次相邻组合，就把对应格子加 1。</p>
       <p>例如，读到“爱猫”：</p>
       <pre>counts[爱的ID][猫的ID] += 1</pre>
+      <div class="callout">这张表存的是<strong>数出来的次数</strong>。M1D 会引入另一张同形状的表存<strong>权重</strong>（可被训练修改的数）——两张表长一样，来历完全不同：次数是数出来的，权重是学出来的。本节这张，名字就叫<strong>计数表</strong>。</div>
     </section>
 
     <section id="explore">
