@@ -111,17 +111,15 @@ print(table.weight)               # 此刻应该看到 49 个 0
 <h2>第 4 步：输入“爱”，取出对应的一行</h2>
 <p>追加：</p>
 <pre><code class="language-python">one_x = torch.tensor([stoi[&quot;爱&quot;]], dtype=torch.long)   # 一道题：输入“爱”（ID=2）
-one_y = torch.tensor([stoi[&quot;猫&quot;]], dtype=torch.long)   # 它的答案：“猫”（ID=4），先存着备用
 
 one_logits = table(one_x)         # 查表：按输入 ID 取出第 2 行 → 形状 [1, 7]
 print(&quot;输入:&quot;, one_x)
-print(&quot;答案:&quot;, one_y)
 print(&quot;模型给的分数:&quot;, one_logits)
 print(&quot;分数的形状:&quot;, one_logits.shape)   # 1 条样本 × 7 个候选
 </code></pre>
-<p>你会看到：输入是 <code>[2]</code>，答案是 <code>[4]</code>，分数是 <code>[[0, 0, 0, 0, 0, 0, 0]]</code>，形状是 <code>[1, 7]</code>。</p>
+<p>你会看到：输入是 <code>[2]</code>，分数是 <code>[[0, 0, 0, 0, 0, 0, 0]]</code>，形状是 <code>[1, 7]</code>。</p>
 <p><strong><code>table(one_x)</code> 做的具体事情就是：按输入 ID 取行。</strong> 输入 2 就取第 2 行。结果有一行，因为我们只输入了一条样本；这一行有七列，因为有七种候选答案。</p>
-<p>模型计算这行分数时没有用到 <code>one_y</code>。“猫”这个正确答案保留到第 6 步评分时才用。</p>
+<p>这一步只需要输入。这道题的正确答案“猫”（ID=4）到第 6 步评分时才会出场——<strong>预测时模型看不到答案</strong>，这是训练的规矩：看到答案的预测没有意义。</p>
 <p>这就是旧版代码中 <code>model(x)</code> 此刻承担的工作。先直接操作这张表，最后再说明如何包进 class。</p>
 
 </section>
@@ -139,9 +137,11 @@ for token, probability in zip(tokens, one_probs[0].tolist()):  # [0] 取出唯�
 
 </section>
 <section id="step-6">
-<h2>第 6 步：用正确答案“猫”计算 loss</h2>
-<p>追加：</p>
-<pre><code class="language-python">p_cat = one_probs[0, stoi[&quot;猫&quot;]]            # 手动路线第 1 步：取出正确答案“猫”的概率
+<h2>第 6 步：拿出正确答案“猫”，计算 loss</h2>
+<p>现在轮到答案出场。这道题的正确答案是“猫”，评分从这一步开始：</p>
+<pre><code class="language-python">one_y = torch.tensor([stoi[&quot;猫&quot;]], dtype=torch.long)   # 标准答案“猫”（ID=4）：评分才需要它
+
+p_cat = one_probs[0, stoi[&quot;猫&quot;]]            # 手动路线第 1 步：取出正确答案“猫”的概率
 manual_loss = -torch.log(p_cat)              # 第 2 步：M1C 的公式 -log(真实答案概率)
 one_loss = F.cross_entropy(one_logits, one_y)  # PyTorch 打包版：直接喂分数和答案 ID
 
