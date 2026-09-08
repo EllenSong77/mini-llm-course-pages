@@ -17,6 +17,7 @@
     .navrow .arrow-btn:disabled { opacity: .4; cursor: default; }
     table.matrix { width: 100%; border-collapse: collapse; table-layout: fixed; }
     table.matrix th, table.matrix td { border: 1px solid var(--line); text-align: center; font-size: 12px; padding: 0; height: 34px; line-height: 1.15; overflow: hidden; }
+    table.matrix td { transition: background-color .5s ease, outline-color .3s ease; }
     table.matrix th { background: var(--soft); color: var(--muted); font-weight: 650; font-size: 11.5px; }
     table.matrix th.corner { width: 44px; }
     table.matrix th.rowlab { cursor: pointer; }
@@ -55,6 +56,9 @@
     .seq-out { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; min-height: 34px; }
     .seq-out .tok { border: 1px solid var(--green); color: var(--green); border-radius: 8px; padding: 3px 9px; font-size: 15px; font-weight: 700; }
     .seq-out .eos { border-style: dashed; color: var(--muted); }
+    .pipe { display: grid; gap: 0; margin-top: 10px; }
+    .pipe .stage { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 4px 0; }
+    .pipe .op { color: var(--muted); font-size: 13px; padding: 0 6px; line-height: 1.5; }
     .hint { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
     .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
     @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
@@ -417,9 +421,22 @@ const STEPS = [
     short: "7 学一次", title: "第 7 步：backward 算梯度，step 改表",
     enter() {
       const d = singleStepDemo();
-      S.mode = "hidden"; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
-      matrixTitle.textContent = "7 × 7 表（演示中，请看右侧的四张小表）";
-      // 构造“爱”这一行在四个时刻的数值：分数(改前/改后)、概率(改前/改后)
+      S.mode = "logits"; S.table = TRAIN.snaps[0].table; S.hlRow = -1; S.hlCell = null; S.dimOthers = false;
+      // 左边大表的三阶段动画
+      const phases = [
+        { t: 0, run() { S.mode = "logits"; S.table = TRAIN.snaps[0].table; S.hlRow = -1; S.hlCell = null; matrixTitle.textContent = "7 × 7 分数表：全 0（等 backward + step）"; } },
+        { t: 1600, run() { S.mode = "grad"; S.grad = d.grad; S.hlRow = ID["爱"]; S.hlCell = null; matrixTitle.textContent = "backward()：算出梯度（绿 = 想加大，红 = 想减小）"; } },
+        { t: 3600, run() { S.mode = "logits"; S.table = d.table; S.hlRow = ID["爱"]; S.hlCell = [ID["爱"], ID["猫"]]; matrixTitle.textContent = "optimizer.step()：新分数写进表格"; } },
+      ];
+      this._timers = [];
+      const play = () => {
+        this._timers.forEach(clearTimeout); this._timers = [];
+        phases.forEach(p => this._timers.push(setTimeout(() => { p.run(); render(); }, p.t)));
+      };
+      this._cleanup = () => { this._timers.forEach(clearTimeout); this._timers = []; };
+      play();
+
+      // 右侧：完整计算管线（五个阶段，数字齐全）
       const before_scores = new Array(V).fill(0);
       const after_scores = d.table[ID["爱"]];
       const before_probs = softmax(before_scores);
@@ -428,26 +445,36 @@ const STEPS = [
       const exCat = Math.exp(after_scores[ID["猫"]]);
       const exOther = Math.exp(after_scores[ID["狗"]]);
       const total = exCat + 6 * exOther;
-      const rowChips = (arr, hl, fmt) =>
-        `<div class="chips">${TOKENS.map((t, j) =>
-          `<span class="chip id"${j === hl ? ' style="border-color:var(--green);color:var(--green);font-weight:800"' : ""}>${esc(t)} ${fmt(arr[j])}</span>`).join("")}</div>`;
+      const chips = (arr, fmt, hl, signColor) =>
+        `<div class="chips">${TOKENS.map((t, j) => {
+          const isHl = hl === j;
+          let style = isHl ? 'border-color:var(--green);font-weight:800;' : "";
+          if (signColor === "neg" && arr[j] < 0) style += "color:var(--green);";
+          if (signColor === "neg" && arr[j] > 0) style += "color:var(--red);";
+          return `<span class="chip id" style="${style}">${esc(t)} ${fmt(arr[j])}</span>`;
+        }).join("")}</div>`;
       stepBody.innerHTML = `
-        <p>这一页只处理一条样本：<b>爱 → 猫</b>。左边大表先收起来，我们只盯“爱”这一行，在四个时刻的样子都摆出来，谁变谁没变一眼看清。</p>
-        <div class="compare">
-          <div class="col"><h5>① 分数（step 改之前）：全 0</h5>${rowChips(before_scores, -1, v => v.toFixed(2))}</div>
-          <div class="col"><h5>② 分数（step 改之后）</h5>${rowChips(after_scores, ID["猫"], v => v.toFixed(2))}</div>
+        <p>这一页只处理一条样本：<b>爱 → 猫</b>。左边大表正在播放全过程（可重播）；下面把“爱”这一行的每一步计算完整列出。</p>
+        <div class="ctl-row"><button class="btn primary" id="replay-btn">▶ 重播左边表格的变化</button></div>
+        <div class="pipe">
+          <div class="stage"><b>① 分数（改之前）</b>：全 0${chips(before_scores, v => v.toFixed(2), -1)}</div>
+          <div class="op">↓ softmax（第 5 步学过：每个分数取指数，再除以总和）</div>
+          <div class="stage"><b>② 概率（①的 softmax）</b>：七个 0 的指数都是 1，平分${chips(before_probs, v => v.toFixed(3), -1)}</div>
+          <div class="op">↓ <b>backward()</b>：对这行的每个格子算梯度，公式就一行——<b>梯度 = ②的概率 −（它是正确答案吗？猫记 1，其余记 0）</b></div>
+          <div class="stage"><b>③ 梯度</b>：猫 0.143 − 1 = <b>−0.857</b>；其余 0.143 − 0 = <b>+0.143</b>${chips(d.grad[ID["爱"]], v => v.toFixed(3), ID["猫"], "neg")}
+            <p class="hint" style="margin:6px 0 0">负 = 加大它能降 loss（绿）；正 = 加大它会升 loss（红）。这条样本只用到“爱”这一行，所以其他 6 行梯度全是 0。</p></div>
+          <div class="op">↓ <b>optimizer.step()</b>：新分数 = 旧分数 − 1.0 × 梯度（猫：0 − (−0.857) = +0.857；其余：0 − 0.143 = −0.143）</div>
+          <div class="stage"><b>④ 分数（改之后）</b>${chips(after_scores, v => v.toFixed(2), ID["猫"])}</div>
+          <div class="op">↓ softmax：猫 e<sup>0.857</sup> ≈ ${exCat.toFixed(2)}，其余每个 e<sup>−0.143</sup> ≈ ${exOther.toFixed(2)}，总和 ≈ ${total.toFixed(2)}</div>
+          <div class="stage"><b>⑤ 概率（④的 softmax）</b>：猫 = ${exCat.toFixed(2)} ÷ ${total.toFixed(2)} ≈ <b>${f3(pc)}</b>${chips(after_probs, v => v.toFixed(3), ID["猫"])}</div>
         </div>
-        <p style="margin:10px 0 4px"><b>1→2 之间发生了什么：</b><code>backward()</code> 先算梯度：猫 = −0.857，其余各 = +0.143（梯度含义：这个数加大，loss 会以这个速率降/升）。然后 <code>optimizer.step()</code> 执行 <b>新分数 = 旧分数 − 1.0 × 梯度</b>：猫 0 − (−0.857) = <b>+0.857</b>，其余 0 − 0.143 = <b>−0.143</b>。其他六行没有梯度，没有变化。</p>
-        <div class="compare">
-          <div class="col"><h5>③ 概率（①的 softmax）：每格 = 1/7</h5>${rowChips(before_probs, -1, v => v.toFixed(3))}</div>
-          <div class="col"><h5>④ 概率（②的 softmax）</h5>${rowChips(after_probs, ID["猫"], v => v.toFixed(3))}</div>
-        </div>
-        <p style="margin:10px 0 4px"><b>2→4 之间发生了什么（softmax 三步）：</b>每个分数取指数：猫 e<sup>0.857</sup> ≈ ${exCat.toFixed(2)}，其余每个 e<sup>−0.143</sup> ≈ ${exOther.toFixed(2)}；总和 = ${exCat.toFixed(2)} + 6 × ${exOther.toFixed(2)} ≈ ${total.toFixed(2)}；猫 = ${exCat.toFixed(2)} ÷ ${total.toFixed(2)} ≈ <b>${f3(pc)}</b>。</p>
         ${barsHTML(after_probs, { picked: ID["猫"] })}
-        <p style="margin:8px 0 2px"><b>最后按 M1C 公式打分：</b>loss = −log(猫的概率)。①→③ 时 loss = −log(0.143) = <b>1.946</b>；②→④ 时 loss = −log(${f3(pc)}) = <b>${f3(d.loss)}</b>。loss 从 1.946 降到 ${f3(d.loss)}，说明这次修改有效。</p>
-        <p class="hint">上面四张小表就是完整过程：<b>分数被 step 改写（①→②），概率由分数 softmax 得到（③←①，④←②）</b>。此刻只有“爱”这一行学过一次，所以狗被压低——下一页 12 条样本一起学，狗会回来。</p>`;
+        <p style="margin:8px 0 2px"><b>最后打分（M1C 公式）：</b>loss = −log(猫的概率)。改之前 −log(0.143) = <b>1.946</b>，改之后 −log(${f3(pc)}) = <b>${f3(d.loss)}</b>。loss 降了，说明这次修改有效。</p>
+        <p class="hint">此刻只有“爱”这一行学过一次，狗被压低了——下一页 12 条样本一起学，狗会回来。</p>`;
+      document.getElementById("replay-btn").addEventListener("click", play);
       stepW.innerHTML = "";
     },
+    leave() { if (this._cleanup) this._cleanup(); },
   },
   {
     short: "8 全体样本", title: "第 8 步：12 条样本一起上（重新从全零开始）",
