@@ -79,7 +79,7 @@ def train(vocab_size):
     return prefix.with_suffix(".model")
 
 
-for size in (256, 512):
+for size in (1024, 2048):
     print(train(size))</pre>
       <p>运行后，每个候选会生成：</p>
       <ul>
@@ -98,8 +98,8 @@ for size in (256, 512):
           <tr><td><code>shuffle_input_sentence=False</code></td><td>关闭句子抽样时的随机打乱。本例未限制 input_sentence_size，会读取全量输入；仅此选项不保证跨库版本、跨平台训练结果完全相同。</td></tr>
         </tbody>
       </table>
-      <div class="callout blue"><code>hard_vocab_limit=False</code> 只是照顾小型演示语料。务必打印 <code>sp.get_piece_size()</code>，确认两个候选实际生成了多少 token；不要只相信文件名里的 256/512。</div>
-      <div class="callout"><strong>2026-09-08 参数补充：</strong>256/512 只适用于基础字符较少的小语料。若报 <code>Vocabulary size is smaller than required_chars</code>，说明连基础字符与特殊 token 都放不下。按报错给出的最低数量调大两个候选，并留出合并空间；例如最低数量为 1300 时，可比较 2048/4096。同步修改训练、评测路径和对比表中的容量。<code>hard_vocab_limit=False</code> 允许词表实际大小小于请求值，不能让过小词表容纳更多必需字符。无需为了凑 256 而删除正常中文字符。这个检查可见 <a href="https://github.com/google/sentencepiece/blob/master/src/trainer_interface.cc">SentencePiece 训练器源码</a>。</div>
+      <div class="callout blue"><code>hard_vocab_limit=False</code> 只是照顾小型演示语料。务必打印 <code>sp.get_piece_size()</code>，确认两个候选实际生成了多少 token；不要只相信文件名里的 1024/2048。</div>
+      <div class="callout"><strong>容量下限自查：</strong>中英混合语料的不同字符很容易超过五六百种，此时 256/512 这类小容量会在训练前就报 <code>Vocabulary size is smaller than required_chars</code>——必需字符加特殊 token 已经放不下。动手前先数一下语料的不同字符数（约等于最低容量），再给合并留出空间，据此选定两个候选容量；例如必需字符约 590 时，可比较 1024/2048。选定后，训练、评测路径和对比表三处必须使用同一组数字。若报错发生在运行中途，按报错给出的最低数量重新调整。<code>hard_vocab_limit=False</code> 允许词表实际大小小于请求值，不能让过小词表容纳更多必需字符。无需为了凑小容量而删除正常中文字符。这个检查可见 <a href="https://github.com/google/sentencepiece/blob/master/src/trainer_interface.cc">SentencePiece 训练器源码</a>。</div>
     </section>
 
     <section id="inspect">
@@ -144,7 +144,7 @@ def inspect(model_file):
     print("\ntokens per character:", total_tokens / total_chars)
     print("UNK count:", total_unk)</pre>
       <p>把 <code>TEST_SAMPLES</code> 和 <code>inspect()</code> 放在同一个评测脚本中，然后在函数定义下方追加调用，否则运行脚本只定义函数，不会打印评测结果：</p>
-      <pre>for size in (256, 512):
+      <pre>for size in (1024, 2048):
     inspect(f"artifacts/tokenizers/bilingual_bpe_{size}.model")</pre>
       <p><code>tokens per character</code> 是这组测试上“每个字符平均被切成多少 token”。在同一测试集上越低，通常表示序列越短；但它不是唯一质量指标。</p>
 
@@ -162,11 +162,11 @@ def inspect(model_file):
       <table>
         <thead><tr><th>候选</th><th>实际词表大小</th><th>测试总 token</th><th>UNK 数</th><th>人工发现的问题</th></tr></thead>
         <tbody>
-          <tr><td>请求 256</td><td>运行后填写</td><td>填写</td><td>填写</td><td>填写</td></tr>
-          <tr><td>请求 512</td><td>运行后填写</td><td>填写</td><td>填写</td><td>填写</td></tr>
+          <tr><td>请求 1024</td><td>运行后填写</td><td>填写</td><td>填写</td><td>填写</td></tr>
+          <tr><td>请求 2048</td><td>运行后填写</td><td>填写</td><td>填写</td><td>填写</td></tr>
         </tbody>
       </table>
-      <p>然后选一个作为 v0，并给出两三句话的理由。不是默认选更大的：如果小语料导致两个候选实际大小接近，或者 512 几乎没有减少序列长度，这本身就是重要结论。</p>
+      <p>然后选一个作为 v0，并给出两三句话的理由。不是默认选更大的：如果小语料导致两个候选实际大小接近，或者 2048 几乎没有减少序列长度，这本身就是重要结论。</p>
       <p>把选中的文件复制或明确记录为：</p>
       <pre>artifacts/tokenizers/bilingual_v0.model
 artifacts/tokenizers/bilingual_v0.vocab</pre>
